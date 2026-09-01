@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ledger — Movie Log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #1C1917;
+    --bg-raised: #24201D;
+    --text: #F2EEE7;
+    --text-dim: #A89F92;
+    --accent: #C4841D;
+    --accent-dim: #8F6217;
+    --sage: #6B7264;
+    --divider: #3A3530;
+    --danger: #A84B32;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+  }
+
+  .display {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+
+  #root { max-width: 900px; margin: 0 auto; padding: 24px 20px 80px; }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--divider);
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+  }
+  .header h1 {
+    font-size: 32px;
+    line-height: 1;
+  }
+  .header .sub {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-top: 4px;
+  }
+  .stats {
+    text-align: right;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .stats strong {
+    color: var(--accent);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    display: block;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .tab {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 4px;
+    margin-right: 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transform: translateY(1px);
+  }
+  .tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+
+  /* Search */
+  .search-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  input[type="text"], select {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    color: var(--text);
+    padding: 10px 12px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    border-radius: 3px;
+  }
+  input[type="text"] {
+    flex: 1;
+  }
+  input[type="text"]:focus, select:focus {
+    outline: none;
+    border-color: var(--accent-dim);
+  }
+  button.primary {
+    background: var(--accent);
+    color: #1C1917;
+    border: none;
+    padding: 10px 18px;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  button.primary:hover { background: #D6934F; }
+  button.ghost {
+    background: none;
+    border: 1px solid var(--divider);
+    color: var(--text-dim);
+    padding: 10px 16px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  button.ghost:hover { border-color: var(--text-dim); color: var(--text); }
+
+  /* Grid of results/log */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--bg-raised);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--divider);
+  }
+  .card img {
+    width: 100%;
+    aspect-ratio: 2/3;
+    object-fit: cover;
+    display: block;
+    background: #2A2622;
+  }
+  .card-body {
+    padding: 10px;
+  }
+  .card-title {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-bottom: 2px;
+  }
+  .card-year {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .card-rating {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .card button.log-btn {
+    width: 100%;
+    margin-top: 8px;
+    background: none;
+    border: 1px solid var(--divider);
+    color: var(--text-dim);
+    padding: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .card button.log-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Log list view */
+  .log-row {
+    display: flex;
+    gap: 14px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--divider);
+    align-items: center;
+  }
+  .log-row img {
+    width: 46px;
+    height: 69px;
+    object-fit: cover;
+    border-radius: 3px;
+    flex-shrink: 0;
+    background: #2A2622;
+  }
+  .log-row-title { font-weight: 600; font-size: 14px; }
+  .log-row-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .log-row-rating {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-left: auto;
+    padding-right: 12px;
+  }
+  .log-row .remove-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px 8px;
+  }
+  .log-row .remove-btn:hover { color: var(--danger); }
+
+  /* Empty state */
+  .empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-dim);
+  }
+  .empty .display { font-size: 24px; color: var(--text); margin-bottom: 8px; }
+
+  /* Modal (rating entry) */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 20px;
+  }
+  .modal {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    padding: 24px;
+    max-width: 380px;
+    width: 100%;
+  }
+  .modal h3 { font-size: 20px; margin-bottom: 4px; }
+  .modal .modal-sub { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+  .modal label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    margin-top: 14px;
+  }
+  .rating-input-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+  .rating-display {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 50px;
+  }
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 24px;
+  }
+  .modal-actions button { flex: 1; }
+
+  /* Quiz */
+  .quiz-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    padding: 24px;
+  }
+  .quiz-step { margin-bottom: 22px; }
+  .quiz-step label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .pill-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .pill {
+    background: none;
+    border: 1px solid var(--divider);
+    color: var(--text-dim);
+    padding: 8px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .pill.selected {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(196, 132, 29, 0.1);
+  }
+
+  .services-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .rec-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    padding: 18px;
+    display: flex;
+    gap: 16px;
+    margin-bottom: 14px;
+  }
+  .rec-card img {
+    width: 80px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 4px;
+    flex-shrink: 0;
+    background: #2A2622;
+  }
+  .rec-title { font-size: 18px; font-weight: 700; font-family: 'Barlow Condensed', sans-serif; }
+  .rec-meta { font-size: 12px; color: var(--text-dim); margin: 4px 0 8px; }
+  .rec-predicted {
+    display: inline-block;
+    background: rgba(196, 132, 29, 0.15);
+    color: var(--accent);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    margin-bottom: 8px;
+  }
+  .rec-why { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+  .rec-providers { font-size: 12px; color: var(--sage); margin-top: 8px; font-weight: 600; }
+
+  .loading { text-align: center; padding: 40px; color: var(--text-dim); }
+
+  .setup-notice {
+    background: var(--bg-raised);
+    border: 1px solid var(--accent-dim);
+    border-radius: 6px;
+    padding: 16px 18px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .setup-notice strong { color: var(--text); }
+  .setup-notice input { margin-top: 10px; width: 100%; }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--divider); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+"use strict";
+const { useState, useEffect, useMemo, useCallback } = React;
+const TMDB_KEY = "4fe436126b74b259d9bce25cb5855e94";
+const TMDB_BASE = "https://api.themoviedb.org/3";
+const IMG_BASE = "https://image.tmdb.org/t/p/w342";
+const ALL_SERVICES = ["Netflix", "Prime Video", "Max", "Hulu", "Disney Plus", "Apple TV Plus", "Peacock", "Paramount Plus"];
+// Map our friendly names to TMDB provider_name substrings
+const SERVICE_MATCH = {
+    "Netflix": "Netflix",
+    "Prime Video": "Prime Video",
+    "Max": "Max",
+    "Hulu": "Hulu",
+    "Disney Plus": "Disney Plus",
+    "Apple TV Plus": "Apple TV",
+    "Peacock": "Peacock",
+    "Paramount Plus": "Paramount Plus"
+};
+function loadState() {
+    try {
+        const raw = localStorage.getItem("ledger_state_v1");
+        if (raw)
+            return JSON.parse(raw);
+    }
+    catch (e) { }
+    return { ratings: {}, services: ["Netflix", "Prime Video", "Max"] };
+}
+function App() {
+    const [state, setState] = useState(loadState());
+    const [tab, setTab] = useState("search");
+    useEffect(() => {
+        try {
+            localStorage.setItem("ledger_state_v1", JSON.stringify(state));
+        }
+        catch (e) { }
+    }, [state]);
+    const ratingsCount = Object.keys(state.ratings).length;
+    const avgRating = ratingsCount
+        ? (Object.values(state.ratings).reduce((a, r) => a + r.rating, 0) / ratingsCount).toFixed(1)
+        : "—";
+    function addRating(movie, rating) {
+        setState(prev => {
+            var _a;
+            return ({
+                ...prev,
+                ratings: {
+                    ...prev.ratings,
+                    [movie.id]: {
+                        id: movie.id,
+                        title: movie.title,
+                        release_date: movie.release_date,
+                        poster_path: movie.poster_path,
+                        genre_ids: movie.genre_ids || ((_a = movie.genres) === null || _a === void 0 ? void 0 : _a.map(g => g.id)) || [],
+                        vote_average: movie.vote_average,
+                        runtime: movie.runtime,
+                        rating: rating,
+                        ratedAt: Date.now()
+                    }
+                }
+            });
+        });
+    }
+    function removeRating(id) {
+        setState(prev => {
+            const next = { ...prev.ratings };
+            delete next[id];
+            return { ...prev, ratings: next };
+        });
+    }
+    function setServices(services) {
+        setState(prev => ({ ...prev, services }));
+    }
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "header" },
+            React.createElement("div", null,
+                React.createElement("h1", { className: "display" }, "Ledger"),
+                React.createElement("div", { className: "sub" }, "movies watched, rated, remembered")),
+            React.createElement("div", { className: "stats" },
+                React.createElement("strong", null, ratingsCount),
+                "logged \u00B7 avg ",
+                avgRating)),
+        React.createElement("div", { className: "tabs" },
+            React.createElement("button", { className: `tab ${tab === "search" ? "active" : ""}`, onClick: () => setTab("search") }, "Search"),
+            React.createElement("button", { className: `tab ${tab === "log" ? "active" : ""}`, onClick: () => setTab("log") }, "My Log"),
+            React.createElement("button", { className: `tab ${tab === "tonight" ? "active" : ""}`, onClick: () => setTab("tonight") }, "Tonight"),
+            React.createElement("button", { className: `tab ${tab === "settings" ? "active" : ""}`, onClick: () => setTab("settings") }, "Services")),
+        tab === "search" && React.createElement(SearchTab, { ratings: state.ratings, onRate: addRating }),
+        tab === "log" && React.createElement(LogTab, { ratings: state.ratings, onRemove: removeRating, onRate: addRating }),
+        tab === "tonight" && React.createElement(TonightTab, { ratings: state.ratings, services: state.services, onRate: addRating }),
+        tab === "settings" && React.createElement(SettingsTab, { services: state.services, onChange: setServices })));
+}
+function RatingModal({ movie, onSave, onClose, initial }) {
+    const [rating, setRating] = useState(initial || 8);
+    return (React.createElement("div", { className: "modal-overlay", onClick: onClose },
+        React.createElement("div", { className: "modal", onClick: e => e.stopPropagation() },
+            React.createElement("h3", { className: "display" }, movie.title),
+            React.createElement("div", { className: "modal-sub" }, (movie.release_date || "").slice(0, 4)),
+            React.createElement("label", null, "Your rating"),
+            React.createElement("div", { className: "rating-input-row" },
+                React.createElement("input", { type: "range", min: "0", max: "10", step: "1", value: rating, onChange: e => setRating(parseInt(e.target.value, 10)) }),
+                React.createElement("div", { className: "rating-display" }, rating)),
+            React.createElement("div", { className: "modal-actions" },
+                React.createElement("button", { className: "ghost", onClick: onClose }, "Cancel"),
+                React.createElement("button", { className: "primary", onClick: () => { onSave(movie, rating); onClose(); } }, "Save rating")))));
+}
+async function fetchTrailerKey(movieId) {
+    try {
+        const res = await fetch(`${TMDB_BASE}/movie/${movieId}/videos?api_key=${TMDB_KEY}`);
+        const data = await res.json();
+        const vids = data.results || [];
+        const official = vids.find(v => v.site === "YouTube" && v.type === "Trailer" && v.official);
+        const anyTrailer = vids.find(v => v.site === "YouTube" && v.type === "Trailer");
+        const anyVideo = vids.find(v => v.site === "YouTube");
+        const pick = official || anyTrailer || anyVideo;
+        return pick ? pick.key : null;
+    }
+    catch (_a) {
+        return null;
+    }
+}
+function TrailerModal({ movie, onClose }) {
+    const [key, setKey] = useState(undefined); // undefined = loading, null = none found
+    useEffect(() => {
+        let cancelled = false;
+        fetchTrailerKey(movie.id).then(k => { if (!cancelled)
+            setKey(k); });
+        return () => { cancelled = true; };
+    }, [movie.id]);
+    return (React.createElement("div", { className: "modal-overlay", onClick: onClose },
+        React.createElement("div", { className: "modal", style: { maxWidth: 640 }, onClick: e => e.stopPropagation() },
+            React.createElement("h3", { className: "display" }, movie.title),
+            React.createElement("div", { className: "modal-sub", style: { marginBottom: 16 } }, (movie.release_date || "").slice(0, 4)),
+            key === undefined && React.createElement("div", { className: "loading" }, "Looking for a trailer\u2026"),
+            key === null && React.createElement("div", { className: "loading" }, "No trailer found for this one."),
+            key && (React.createElement("div", { style: { position: "relative", width: "100%", paddingTop: "56.25%", borderRadius: 4, overflow: "hidden" } },
+                React.createElement("iframe", { src: `https://www.youtube.com/embed/${key}`, title: "Trailer", frameBorder: "0", allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture", allowFullScreen: true, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%" } }))),
+            React.createElement("div", { className: "modal-actions" },
+                React.createElement("button", { className: "ghost", style: { flex: "none", marginLeft: "auto" }, onClick: onClose }, "Close")))));
+}
+async function fetchMovieDetails(movieId) {
+    try {
+        const res = await fetch(`${TMDB_BASE}/movie/${movieId}?api_key=${TMDB_KEY}&append_to_response=credits`);
+        const data = await res.json();
+        if (data.success === false)
+            return null;
+        return data;
+    }
+    catch (_a) {
+        return null;
+    }
+}
+function MovieDetailModal({ movieId, onClose, onRate, onTrailer, ratings }) {
+    const [details, setDetails] = useState(undefined); // undefined = loading, null = failed
+    useEffect(() => {
+        let cancelled = false;
+        fetchMovieDetails(movieId).then(d => { if (!cancelled)
+            setDetails(d); });
+        return () => { cancelled = true; };
+    }, [movieId]);
+    const isRated = details && ratings[details.id];
+    return (React.createElement("div", { className: "modal-overlay", onClick: onClose },
+        React.createElement("div", { className: "modal", style: { maxWidth: 560, maxHeight: "85vh", overflowY: "auto" }, onClick: e => e.stopPropagation() },
+            details === undefined && React.createElement("div", { className: "loading" }, "Loading details\u2026"),
+            details === null && React.createElement("div", { className: "loading" }, "Couldn't load details for this one."),
+            details && (React.createElement("div", null,
+                React.createElement("div", { style: { display: "flex", gap: 16, marginBottom: 16 } },
+                    details.poster_path
+                        ? React.createElement("img", { src: `${IMG_BASE}${details.poster_path}`, alt: details.title, style: { width: 90, height: 135, objectFit: "cover", borderRadius: 4, flexShrink: 0 } })
+                        : React.createElement("div", { style: { width: 90, height: 135, background: "#2A2622", borderRadius: 4, flexShrink: 0 } }),
+                    React.createElement("div", null,
+                        React.createElement("h3", { className: "display", style: { fontSize: 24 } }, details.title),
+                        React.createElement("div", { className: "modal-sub", style: { marginTop: 4 } },
+                            (details.release_date || "").slice(0, 4),
+                            details.runtime ? ` · ${details.runtime} min` : "",
+                            details.vote_average ? ` · ${details.vote_average.toFixed(1)}★ TMDB` : ""),
+                        React.createElement("div", { style: { fontSize: 12, color: "var(--sage)", marginTop: 6, fontWeight: 600 } }, (details.genres || []).map(g => g.name).join(", ")),
+                        isRated && React.createElement("div", { className: "card-rating", style: { marginTop: 8 } },
+                            "\u2605 You rated: ",
+                            ratings[details.id].rating))),
+                details.overview && (React.createElement("div", { style: { fontSize: 14, lineHeight: 1.6, color: "var(--text)", marginBottom: 18 } }, details.overview)),
+                details.credits && details.credits.cast && details.credits.cast.length > 0 && (React.createElement("div", { style: { marginBottom: 18 } },
+                    React.createElement("label", { style: { display: "block", fontSize: 12, fontWeight: 600, color: "var(--text-dim)", marginBottom: 8 } }, "Cast"),
+                    React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 6 } }, details.credits.cast.slice(0, 8).map(actor => (React.createElement("span", { key: actor.cast_id || actor.credit_id, style: { fontSize: 12, background: "var(--bg)", border: "1px solid var(--divider)", borderRadius: 20, padding: "4px 10px", color: "var(--text-dim)" } },
+                        actor.name,
+                        actor.character ? ` as ${actor.character}` : "")))))),
+                details.credits && details.credits.crew && ((() => {
+                    const director = details.credits.crew.find(c => c.job === "Director");
+                    return director ? (React.createElement("div", { style: { fontSize: 13, color: "var(--text-dim)", marginBottom: 18 } },
+                        "Directed by ",
+                        React.createElement("strong", { style: { color: "var(--text)" } }, director.name))) : null;
+                })()),
+                React.createElement("div", { className: "modal-actions" },
+                    !isRated && React.createElement("button", { className: "primary", onClick: () => { onRate(details); } }, "Rate this"),
+                    React.createElement("button", { className: "ghost", onClick: () => onTrailer(details) }, "\u25B6 Trailer"),
+                    React.createElement("button", { className: "ghost", onClick: onClose }, "Close")))),
+            (details === undefined || details === null) && (React.createElement("div", { className: "modal-actions" },
+                React.createElement("button", { className: "ghost", style: { flex: "none", marginLeft: "auto" }, onClick: onClose }, "Close"))))));
+}
+function SearchTab({ ratings, onRate }) {
+    const [mode, setMode] = useState("movie"); // "movie" | "actor" | "genre"
+    const [query, setQuery] = useState("");
+    const [results, setResults] = useState([]);
+    const [actorName, setActorName] = useState(null);
+    const [selectedGenre, setSelectedGenre] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [modalMovie, setModalMovie] = useState(null);
+    const [trailerMovie, setTrailerMovie] = useState(null);
+    const [detailMovieId, setDetailMovieId] = useState(null);
+    const [error, setError] = useState(null);
+    const genreList = Object.entries(GENRE_MAP)
+        .map(([id, name]) => ({ id: parseInt(id), name }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    async function doMovieSearch() {
+        const res = await fetch(`${TMDB_BASE}/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        if (data.success === false)
+            throw new Error(data.status_message || "API error — check your TMDB key.");
+        return data.results || [];
+    }
+    async function doActorSearch() {
+        const personRes = await fetch(`${TMDB_BASE}/search/person?api_key=${TMDB_KEY}&query=${encodeURIComponent(query)}`);
+        const personData = await personRes.json();
+        if (personData.success === false)
+            throw new Error(personData.status_message || "API error — check your TMDB key.");
+        const person = (personData.results || [])[0];
+        if (!person) {
+            setActorName(null);
+            return [];
+        }
+        setActorName(person.name);
+        const creditsRes = await fetch(`${TMDB_BASE}/person/${person.id}/movie_credits?api_key=${TMDB_KEY}`);
+        const creditsData = await creditsRes.json();
+        const cast = (creditsData.cast || []).slice().sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+        return cast;
+    }
+    async function doGenreSearch(genreId) {
+        setSelectedGenre(genreId);
+        setLoading(true);
+        setError(null);
+        try {
+            const res = await fetch(`${TMDB_BASE}/discover/movie?api_key=${TMDB_KEY}&with_genres=${genreId}&sort_by=vote_average.desc&vote_count.gte=500`);
+            const data = await res.json();
+            if (data.success === false)
+                throw new Error(data.status_message || "API error — check your TMDB key.");
+            setResults(data.results || []);
+        }
+        catch (err) {
+            setError(err.message || "Couldn't reach TMDB. Check your connection.");
+            setResults([]);
+        }
+        setLoading(false);
+    }
+    async function doSearch(e) {
+        e.preventDefault();
+        if (!query.trim())
+            return;
+        setLoading(true);
+        setError(null);
+        setActorName(null);
+        try {
+            const list = mode === "actor" ? await doActorSearch() : await doMovieSearch();
+            setResults(list);
+        }
+        catch (err) {
+            setError(err.message || "Couldn't reach TMDB. Check your connection.");
+            setResults([]);
+        }
+        setLoading(false);
+    }
+    function switchMode(newMode) {
+        setMode(newMode);
+        setResults([]);
+        setActorName(null);
+        setSelectedGenre(null);
+        setError(null);
+    }
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "pill-group", style: { marginBottom: 12 } },
+            React.createElement("button", { className: `pill ${mode === "movie" ? "selected" : ""}`, onClick: () => switchMode("movie") }, "By movie title"),
+            React.createElement("button", { className: `pill ${mode === "actor" ? "selected" : ""}`, onClick: () => switchMode("actor") }, "By actor"),
+            React.createElement("button", { className: `pill ${mode === "genre" ? "selected" : ""}`, onClick: () => switchMode("genre") }, "By category")),
+        mode !== "genre" && (React.createElement("form", { className: "search-row", onSubmit: doSearch },
+            React.createElement("input", { type: "text", placeholder: mode === "actor" ? "Search an actor's name…" : "Search a movie title…", value: query, onChange: e => setQuery(e.target.value) }),
+            React.createElement("button", { type: "submit", className: "primary" }, "Search"))),
+        mode === "genre" && (React.createElement("div", { className: "pill-group", style: { marginBottom: 20 } }, genreList.map(g => (React.createElement("button", { key: g.id, className: `pill ${selectedGenre === g.id ? "selected" : ""}`, onClick: () => doGenreSearch(g.id) }, g.name))))),
+        error && React.createElement("div", { className: "setup-notice" },
+            React.createElement("strong", null, "Error:"),
+            " ",
+            error),
+        loading && React.createElement("div", { className: "loading" }, mode === "genre" ? "Finding top-rated picks…" : "Searching…"),
+        !loading && mode === "actor" && actorName && (React.createElement("div", { style: { fontSize: 13, color: "var(--text-dim)", marginBottom: 12 } },
+            "Showing movies with ",
+            React.createElement("strong", { style: { color: "var(--text)" } }, actorName))),
+        !loading && mode === "genre" && selectedGenre && results.length > 0 && (React.createElement("div", { style: { fontSize: 13, color: "var(--text-dim)", marginBottom: 12 } },
+            "Top rated in ",
+            React.createElement("strong", { style: { color: "var(--text)" } }, GENRE_MAP[selectedGenre]))),
+        !loading && mode === "actor" && query && actorName === null && results.length === 0 && !error && (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "No actor found"),
+            React.createElement("div", null, "Try checking the spelling of the name."))),
+        !loading && results.length > 0 && (React.createElement("div", { className: "grid" }, results.map(movie => (React.createElement("div", { className: "card", key: movie.id },
+            movie.poster_path
+                ? React.createElement("img", { src: `${IMG_BASE}${movie.poster_path}`, alt: movie.title, style: { cursor: "pointer" }, onClick: () => setDetailMovieId(movie.id) })
+                : React.createElement("img", { src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", alt: "", style: { cursor: "pointer" }, onClick: () => setDetailMovieId(movie.id) }),
+            React.createElement("div", { className: "card-body" },
+                React.createElement("div", { className: "card-title", style: { cursor: "pointer" }, onClick: () => setDetailMovieId(movie.id) }, movie.title),
+                React.createElement("div", { className: "card-year" },
+                    (movie.release_date || "").slice(0, 4) || "—",
+                    movie.vote_average ? ` · ${movie.vote_average.toFixed(1)}★ TMDB` : ""),
+                ratings[movie.id] && React.createElement("div", { className: "card-rating", style: { marginBottom: 6 } },
+                    "\u2605 ",
+                    ratings[movie.id].rating),
+                React.createElement("div", { style: { display: "flex", gap: 6 } },
+                    !ratings[movie.id] && React.createElement("button", { className: "log-btn", onClick: () => setModalMovie(movie) }, "+ Log & rate"),
+                    React.createElement("button", { className: "log-btn", onClick: () => setTrailerMovie(movie), title: "Watch trailer" }, "\u25B6 Trailer")))))))),
+        !loading && !error && results.length === 0 && query === "" && mode !== "genre" && (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, mode === "actor" ? "Search an actor to see their movies" : "Search for a movie to get started"),
+            React.createElement("div", null, "Once you rate a few, head to the Tonight tab for recommendations."))),
+        !loading && mode === "genre" && !selectedGenre && (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Pick a category"),
+            React.createElement("div", null, "Top-rated movies in that category will show up first."))),
+        detailMovieId && (React.createElement(MovieDetailModal, { movieId: detailMovieId, ratings: ratings, onClose: () => setDetailMovieId(null), onRate: (m) => { setModalMovie(m); setDetailMovieId(null); }, onTrailer: (m) => { setTrailerMovie(m); setDetailMovieId(null); } })),
+        modalMovie && (React.createElement(RatingModal, { movie: modalMovie, onSave: onRate, onClose: () => setModalMovie(null) })),
+        trailerMovie && (React.createElement(TrailerModal, { movie: trailerMovie, onClose: () => setTrailerMovie(null) }))));
+}
+function LogTab({ ratings, onRemove, onRate }) {
+    const [editMovie, setEditMovie] = useState(null);
+    const [trailerMovie, setTrailerMovie] = useState(null);
+    const [detailMovieId, setDetailMovieId] = useState(null);
+    const list = Object.values(ratings).sort((a, b) => b.ratedAt - a.ratedAt);
+    if (list.length === 0) {
+        return (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Your log is empty"),
+            React.createElement("div", null, "Rate movies from the Search tab and they'll show up here.")));
+    }
+    return (React.createElement("div", null,
+        list.map(m => (React.createElement("div", { className: "log-row", key: m.id },
+            m.poster_path
+                ? React.createElement("img", { src: `${IMG_BASE}${m.poster_path}`, alt: m.title, style: { cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) })
+                : React.createElement("div", { style: { width: 46, height: 69, background: "#2A2622", borderRadius: 3, flexShrink: 0, cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) }),
+            React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) },
+                React.createElement("div", { className: "log-row-title" }, m.title),
+                React.createElement("div", { className: "log-row-meta" },
+                    (m.release_date || "").slice(0, 4) || "—",
+                    m.vote_average ? ` · ${m.vote_average.toFixed(1)}★ TMDB` : "")),
+            React.createElement("button", { className: "remove-btn", onClick: () => setTrailerMovie(m), title: "Watch trailer", style: { fontSize: 14 } }, "\u25B6"),
+            React.createElement("div", { className: "log-row-rating", style: { cursor: "pointer" }, onClick: () => setEditMovie(m) }, m.rating),
+            React.createElement("button", { className: "remove-btn", onClick: () => onRemove(m.id), title: "Remove" }, "\u2715")))),
+        editMovie && (React.createElement(RatingModal, { movie: editMovie, initial: editMovie.rating, onSave: onRate, onClose: () => setEditMovie(null) })),
+        trailerMovie && (React.createElement(TrailerModal, { movie: trailerMovie, onClose: () => setTrailerMovie(null) })),
+        detailMovieId && (React.createElement(MovieDetailModal, { movieId: detailMovieId, ratings: ratings, onClose: () => setDetailMovieId(null), onRate: (m) => { setEditMovie({ ...m, rating: ratings[m.id] ? ratings[m.id].rating : 8 }); setDetailMovieId(null); }, onTrailer: (m) => { setTrailerMovie(m); setDetailMovieId(null); } }))));
+}
+function SettingsTab({ services, onChange }) {
+    function toggle(s) {
+        if (services.includes(s))
+            onChange(services.filter(x => x !== s));
+        else
+            onChange([...services, s]);
+    }
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "setup-notice" },
+            React.createElement("strong", null, "Your streaming services"),
+            " \u2014 used to filter \"Tonight\" recommendations to what you can actually watch right now."),
+        React.createElement("div", { className: "services-row" }, ALL_SERVICES.map(s => (React.createElement("button", { key: s, className: `pill ${services.includes(s) ? "selected" : ""}`, onClick: () => toggle(s) }, s))))));
+}
+// Genre id -> name map (TMDB standard movie genres, static so we don't need an extra call)
+const GENRE_MAP = {
+    28: "Action", 12: "Adventure", 16: "Animation", 35: "Comedy", 80: "Crime",
+    99: "Documentary", 18: "Drama", 10751: "Family", 14: "Fantasy", 36: "History",
+    27: "Horror", 10402: "Music", 9648: "Mystery", 10749: "Romance", 878: "Science Fiction",
+    10770: "TV Movie", 53: "Thriller", 10752: "War", 37: "Western"
+};
+function TonightTab({ ratings, services, onRate }) {
+    const [mood, setMood] = useState(null);
+    const [runtime, setRuntime] = useState(null);
+    const [recs, setRecs] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+    const [modalMovie, setModalMovie] = useState(null);
+    const [trailerMovie, setTrailerMovie] = useState(null);
+    const [detailMovieId, setDetailMovieId] = useState(null);
+    const ratedList = Object.values(ratings);
+    const hasEnoughData = ratedList.length >= 3;
+    // Build a taste profile: genre -> avg rating weighted by count
+    const genreScores = useMemo(() => {
+        const scores = {};
+        ratedList.forEach(m => {
+            (m.genre_ids || []).forEach(gid => {
+                if (!scores[gid])
+                    scores[gid] = { total: 0, count: 0 };
+                scores[gid].total += m.rating;
+                scores[gid].count += 1;
+            });
+        });
+        const result = {};
+        Object.entries(scores).forEach(([gid, s]) => { result[gid] = s.total / s.count; });
+        return result;
+    }, [ratedList]);
+    const topGenreIds = useMemo(() => {
+        return Object.entries(genreScores)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([gid]) => parseInt(gid));
+    }, [genreScores]);
+    const moods = [
+        { key: "any", label: "Whatever" },
+        { key: "funny", label: "Funny", genres: [35] },
+        { key: "serious", label: "Serious", genres: [18] },
+        { key: "thriller", label: "Thriller", genres: [53, 9648] },
+        { key: "mindless", label: "Mindless fun", genres: [28, 12] }
+    ];
+    const runtimes = [
+        { key: "90", label: "< 90 min", max: 90 },
+        { key: "120", label: "< 2 hrs", max: 120 },
+        { key: "any", label: "Doesn't matter", max: null }
+    ];
+    async function findMovies() {
+        setLoading(true);
+        setError(null);
+        setRecs(null);
+        try {
+            const moodObj = moods.find(m => m.key === mood);
+            const genresToUse = (moodObj && moodObj.genres) ? moodObj.genres : topGenreIds;
+            const genreParam = genresToUse.length ? genresToUse.join(",") : (topGenreIds.join(",") || "18");
+            const runtimeObj = runtimes.find(r => r.key === runtime);
+            let url = `${TMDB_BASE}/discover/movie?api_key=${TMDB_KEY}&sort_by=popularity.desc&vote_count.gte=200&vote_average.gte=6.5&with_genres=${genreParam}`;
+            if (runtimeObj && runtimeObj.max)
+                url += `&with_runtime.lte=${runtimeObj.max}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.success === false) {
+                setError(data.status_message || "API error.");
+                setLoading(false);
+                return;
+            }
+            let candidates = (data.results || []).filter(m => !ratings[m.id]);
+            // Score candidates by genre overlap with taste profile
+            candidates = candidates.map(m => {
+                const overlapGenres = (m.genre_ids || []).filter(g => genreScores[g] !== undefined);
+                const tasteBoost = overlapGenres.length
+                    ? overlapGenres.reduce((sum, g) => sum + genreScores[g], 0) / overlapGenres.length
+                    : m.vote_average;
+                const predicted = Math.min(10, (tasteBoost * 0.7 + m.vote_average * 0.3));
+                return { ...m, predicted };
+            }).sort((a, b) => b.predicted - a.predicted);
+            const top = candidates.slice(0, 6);
+            // Fetch watch providers for each, filter/annotate by user's services
+            const withProviders = await Promise.all(top.map(async (m) => {
+                var _a, _b;
+                try {
+                    const pRes = await fetch(`${TMDB_BASE}/movie/${m.id}/watch/providers?api_key=${TMDB_KEY}`);
+                    const pData = await pRes.json();
+                    const usProviders = ((_b = (_a = pData.results) === null || _a === void 0 ? void 0 : _a.US) === null || _b === void 0 ? void 0 : _b.flatrate) || [];
+                    const matchedServices = services.filter(s => usProviders.some(p => p.provider_name.includes(SERVICE_MATCH[s] || s)));
+                    return { ...m, providers: usProviders.map(p => p.provider_name), matchedServices };
+                }
+                catch (_c) {
+                    return { ...m, providers: [], matchedServices: [] };
+                }
+            }));
+            // Prefer ones available on user's services, but show all if none match
+            const onServices = withProviders.filter(m => m.matchedServices.length > 0);
+            const finalRecs = (onServices.length > 0 ? onServices : withProviders).slice(0, 5);
+            setRecs(finalRecs);
+        }
+        catch (err) {
+            setError("Couldn't reach TMDB. Check your connection.");
+        }
+        setLoading(false);
+    }
+    if (!hasEnoughData) {
+        return (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Rate a few more movies first"),
+            React.createElement("div", null,
+                "You've logged ",
+                ratedList.length,
+                " of 3 needed. Once you rate at least 3, Ledger can learn your taste and recommend something for tonight.")));
+    }
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "quiz-card" },
+            React.createElement("div", { className: "quiz-step" },
+                React.createElement("label", null, "Mood"),
+                React.createElement("div", { className: "pill-group" }, moods.map(m => (React.createElement("button", { key: m.key, className: `pill ${mood === m.key ? "selected" : ""}`, onClick: () => setMood(m.key) }, m.label))))),
+            React.createElement("div", { className: "quiz-step" },
+                React.createElement("label", null, "How much time"),
+                React.createElement("div", { className: "pill-group" }, runtimes.map(r => (React.createElement("button", { key: r.key, className: `pill ${runtime === r.key ? "selected" : ""}`, onClick: () => setRuntime(r.key) }, r.label))))),
+            React.createElement("button", { className: "primary", style: { width: "100%" }, onClick: findMovies }, "Find me 5 movies")),
+        loading && React.createElement("div", { className: "loading" }, "Cross-referencing your taste against what's streaming\u2026"),
+        error && React.createElement("div", { className: "setup-notice", style: { marginTop: 20 } },
+            React.createElement("strong", null, "Error:"),
+            " ",
+            error),
+        recs && recs.length === 0 && !loading && (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Nothing matched"),
+            React.createElement("div", null, "Try a different mood or runtime."))),
+        recs && recs.length > 0 && (React.createElement("div", { style: { marginTop: 24 } }, recs.map(m => (React.createElement("div", { className: "rec-card", key: m.id },
+            m.poster_path
+                ? React.createElement("img", { src: `${IMG_BASE}${m.poster_path}`, alt: m.title, style: { cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) })
+                : React.createElement("div", { style: { width: 80, height: 120, background: "#2A2622", borderRadius: 4, flexShrink: 0, cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) }),
+            React.createElement("div", { style: { flex: 1 } },
+                React.createElement("div", { className: "rec-title", style: { cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) }, m.title),
+                React.createElement("div", { className: "rec-meta" },
+                    (m.release_date || "").slice(0, 4),
+                    " \u00B7 ",
+                    (m.genre_ids || []).map(g => GENRE_MAP[g]).filter(Boolean).slice(0, 2).join(", ")),
+                m.overview && (React.createElement("div", { style: { fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5, marginBottom: 8 } }, m.overview.length > 140 ? m.overview.slice(0, 140).trim() + "…" : m.overview)),
+                React.createElement("div", { className: "rec-predicted" },
+                    "Predicted for you: ",
+                    m.predicted.toFixed(1)),
+                React.createElement("div", { className: "rec-why" },
+                    "TMDB score ",
+                    m.vote_average.toFixed(1),
+                    ". Matched against your top-rated genres."),
+                m.matchedServices && m.matchedServices.length > 0
+                    ? React.createElement("div", { className: "rec-providers" },
+                        "Streaming on ",
+                        m.matchedServices.join(", "))
+                    : React.createElement("div", { className: "rec-providers", style: { color: "var(--text-dim)" } }, "Not confirmed on your services \u2014 check availability"),
+                React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 12 } },
+                    ratings[m.id]
+                        ? React.createElement("span", { className: "card-rating" }, "\u2605 Already logged")
+                        : React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => setModalMovie(m) }, "Already seen it? Rate it"),
+                    React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => setTrailerMovie(m) }, "\u25B6 Trailer")))))))),
+        modalMovie && (React.createElement(RatingModal, { movie: modalMovie, onSave: onRate, onClose: () => setModalMovie(null) })),
+        trailerMovie && (React.createElement(TrailerModal, { movie: trailerMovie, onClose: () => setTrailerMovie(null) })),
+        detailMovieId && (React.createElement(MovieDetailModal, { movieId: detailMovieId, ratings: ratings, onClose: () => setDetailMovieId(null), onRate: (m) => { setModalMovie(m); setDetailMovieId(null); }, onTrailer: (m) => { setTrailerMovie(m); setDetailMovieId(null); } }))));
+}
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App, null));
+
+</script>
+</body>
+</html>
