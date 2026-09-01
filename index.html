@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ledger — Movie Log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #1C1917;
+    --bg-raised: #24201D;
+    --text: #F2EEE7;
+    --text-dim: #A89F92;
+    --accent: #C4841D;
+    --accent-dim: #8F6217;
+    --sage: #6B7264;
+    --divider: #3A3530;
+    --danger: #A84B32;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+  }
+
+  .display {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+  }
+
+  #root { max-width: 900px; margin: 0 auto; padding: 24px 20px 80px; }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--divider);
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+  }
+  .header h1 {
+    font-size: 32px;
+    line-height: 1;
+  }
+  .header .sub {
+    color: var(--text-dim);
+    font-size: 13px;
+    margin-top: 4px;
+  }
+  .stats {
+    text-align: right;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .stats strong {
+    color: var(--accent);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    display: block;
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .tab {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 10px 4px;
+    margin-right: 20px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transform: translateY(1px);
+  }
+  .tab.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+
+  /* Search */
+  .search-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  input[type="text"], select {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    color: var(--text);
+    padding: 10px 12px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    border-radius: 3px;
+  }
+  input[type="text"] {
+    flex: 1;
+  }
+  input[type="text"]:focus, select:focus {
+    outline: none;
+    border-color: var(--accent-dim);
+  }
+  button.primary {
+    background: var(--accent);
+    color: #1C1917;
+    border: none;
+    padding: 10px 18px;
+    font-family: 'Inter', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  button.primary:hover { background: #D6934F; }
+  button.ghost {
+    background: none;
+    border: 1px solid var(--divider);
+    color: var(--text-dim);
+    padding: 10px 16px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  button.ghost:hover { border-color: var(--text-dim); color: var(--text); }
+
+  /* Grid of results/log */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 16px;
+  }
+  .card {
+    background: var(--bg-raised);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--divider);
+  }
+  .card img {
+    width: 100%;
+    aspect-ratio: 2/3;
+    object-fit: cover;
+    display: block;
+    background: #2A2622;
+  }
+  .card-body {
+    padding: 10px;
+  }
+  .card-title {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-bottom: 2px;
+  }
+  .card-year {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .card-rating {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .card button.log-btn {
+    width: 100%;
+    margin-top: 8px;
+    background: none;
+    border: 1px solid var(--divider);
+    color: var(--text-dim);
+    padding: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .card button.log-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Log list view */
+  .log-row {
+    display: flex;
+    gap: 14px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--divider);
+    align-items: center;
+  }
+  .log-row img {
+    width: 46px;
+    height: 69px;
+    object-fit: cover;
+    border-radius: 3px;
+    flex-shrink: 0;
+    background: #2A2622;
+  }
+  .log-row-title { font-weight: 600; font-size: 14px; }
+  .log-row-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .log-row-rating {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-left: auto;
+    padding-right: 12px;
+  }
+  .log-row .remove-btn {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 18px;
+    padding: 4px 8px;
+  }
+  .log-row .remove-btn:hover { color: var(--danger); }
+
+  /* Empty state */
+  .empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-dim);
+  }
+  .empty .display { font-size: 24px; color: var(--text); margin-bottom: 8px; }
+
+  /* Modal (rating entry) */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 20px;
+  }
+  .modal {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    padding: 24px;
+    max-width: 380px;
+    width: 100%;
+  }
+  .modal h3 { font-size: 20px; margin-bottom: 4px; }
+  .modal .modal-sub { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+  .modal label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+    margin-top: 14px;
+  }
+  .rating-input-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+  .rating-display {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 50px;
+  }
+  .modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 24px;
+  }
+  .modal-actions button { flex: 1; }
+
+  /* Quiz */
+  .quiz-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    padding: 24px;
+  }
+  .quiz-step { margin-bottom: 22px; }
+  .quiz-step label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+  }
+  .pill-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .pill {
+    background: none;
+    border: 1px solid var(--divider);
+    color: var(--text-dim);
+    padding: 8px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .pill.selected {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(196, 132, 29, 0.1);
+  }
+
+  .services-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+
+  .rec-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    border-radius: 6px;
+    padding: 18px;
+    display: flex;
+    gap: 16px;
+    margin-bottom: 14px;
+  }
+  .rec-card img {
+    width: 80px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 4px;
+    flex-shrink: 0;
+    background: #2A2622;
+  }
+  .rec-title { font-size: 18px; font-weight: 700; font-family: 'Barlow Condensed', sans-serif; }
+  .rec-meta { font-size: 12px; color: var(--text-dim); margin: 4px 0 8px; }
+  .rec-predicted {
+    display: inline-block;
+    background: rgba(196, 132, 29, 0.15);
+    color: var(--accent);
+    font-family: 'Barlow Condensed', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    margin-bottom: 8px;
+  }
+  .rec-why { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
+  .rec-providers { font-size: 12px; color: var(--sage); margin-top: 8px; font-weight: 600; }
+
+  .loading { text-align: center; padding: 40px; color: var(--text-dim); }
+
+  .setup-notice {
+    background: var(--bg-raised);
+    border: 1px solid var(--accent-dim);
+    border-radius: 6px;
+    padding: 16px 18px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .setup-notice strong { color: var(--text); }
+  .setup-notice input { margin-top: 10px; width: 100%; }
+
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--divider); border-radius: 4px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useCallback } = React;
+
+const TMDB_KEY = "4fe436126b74b259d9bce25cb5855e94";
+const TMDB_BASE = "https://api.themoviedb.org/3";
+const IMG_BASE = "https://image.tmdb.org/t/p/w342";
+
+const ALL_SERVICES = ["Netflix", "Prime Video", "Max", "Hulu", "Disney Plus", "Apple TV Plus", "Peacock", "Paramount Plus"];
+// Map our friendly names to TMDB provider_name substrings
+const SERVICE_MATCH = {
+  "Netflix": "Netflix",
+  "Prime Video": "Prime Video",
+  "Max": "Max",
+  "Hulu": "Hulu",
+  "Disney Plus": "Disney Plus",
+  "Apple TV Plus": "Apple TV",
+  "Peacock": "Peacock",
+  "Paramount Plus": "Paramount Plus"
+};
+
+function loadState() {
+  try {
+    const raw = localStorage.getItem("ledger_state_v1");
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return { ratings: {}, services: ["Netflix", "Prime Video", "Max"] };
+}
+
+function App() {
+  const [state, setState] = useState(loadState());
+  const [tab, setTab] = useState("search");
+
+  useEffect(() => {
+    try { localStorage.setItem("ledger_state_v1", JSON.stringify(state)); } catch (e) {}
+  }, [state]);
+
+  const ratingsCount = Object.keys(state.ratings).length;
+  const avgRating = ratingsCount
+    ? (Object.values(state.ratings).reduce((a, r) => a + r.rating, 0) / ratingsCount).toFixed(1)
+    : "—";
+
+  function addRating(movie, rating) {
+    setState(prev => ({
+      ...prev,
+      ratings: {
+        ...prev.ratings,
+        [movie.id]: {
+          id: movie.id,
+          title: movie.title,
+          release_date: movie.release_date,
+          poster_path: movie.poster_path,
+          genre_ids: movie.genre_ids || movie.genres?.map(g => g.id) || [],
+          vote_average: movie.vote_average,
+          runtime: movie.runtime,
+          rating: rating,
+          ratedAt: Date.now()
+        }
+      }
+    }));
+  }
+
+  function removeRating(id) {
+    setState(prev => {
+      const next = { ...prev.ratings };
+      delete next[id];
+      return { ...prev, ratings: next };
+    });
+  }
+
+  function setServices(services) {
+    setState(prev => ({ ...prev, services }));
+  }
+
+  return (
+    <div>
+      <div className="header">
+        <div>
+          <h1 className="display">Ledger</h1>
+          <div className="sub">movies watched, rated, remembered</div>
+        </div>
+        <div className="stats">
+          <strong>{ratingsCount}</strong>
+          logged &middot; avg {avgRating}
+        </div>
+      </div>
+
+      <div className="tabs">
+        <button className={`tab ${tab === "search" ? "active" : ""}`} onClick={() => setTab("search")}>Search</button>
+        <button className={`tab ${tab === "log" ? "active" : ""}`} onClick={() => setTab("log")}>My Log</button>
+        <button className={`tab ${tab === "tonight" ? "active" : ""}`} onClick={() => setTab("tonight")}>Tonight</button>
+        <button className={`tab ${tab === "settings" ? "active" : ""}`} onClick={() => setTab("settings")}>Services</button>
+      </div>
+
+      {tab === "search" && <SearchTab ratings={state.ratings} onRate={addRating} />}
+      {tab === "log" && <LogTab ratings={state.ratings} onRemove={removeRating} onRate={addRating} />}
+      {tab === "tonight" && <TonightTab ratings={state.ratings} services={state.services} onRate={addRating} />}
+      {tab === "settings" && <SettingsTab services={state.services} onChange={setServices} />}
+    </div>
+  );
+}
+
+function RatingModal({ movie, onSave, onClose, initial }) {
+  const [rating, setRating] = useState(initial || 7.5);
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
+        <h3 className="display">{movie.title}</h3>
+        <div className="modal-sub">{(movie.release_date || "").slice(0, 4)}</div>
+        <label>Your rating</label>
+        <div className="rating-input-row">
+          <input type="range" min="0" max="10" step="0.5" value={rating} onChange={e => setRating(parseFloat(e.target.value))} />
+          <div className="rating-display">{rating.toFixed(1)}</div>
+        </div>
+        <div className="modal-actions">
+          <button className="ghost" onClick={onClose}>Cancel</button>
+          <button className="primary" onClick={() => { onSave(movie, rating); onClose(); }}>Save rating</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SearchTab({ ratings, onRate }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [modalMovie, setModalMovie] = useState(null);
+  const [error, setError] = useState(null);
+
+  async function doSearch(e) {
+    e.preventDefault();
+    if (!query.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${TMDB_BASE}/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      if (data.success === false) {
+        setError(data.status_message || "API error — check your TMDB key.");
+        setResults([]);
+      } else {
+        setResults(data.results || []);
+      }
+    } catch (err) {
+      setError("Couldn't reach TMDB. Check your connection.");
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div>
+      <form className="search-row" onSubmit={doSearch}>
+        <input type="text" placeholder="Search a movie title…" value={query} onChange={e => setQuery(e.target.value)} />
+        <button type="submit" className="primary">Search</button>
+      </form>
+
+      {error && <div className="setup-notice"><strong>Error:</strong> {error}</div>}
+      {loading && <div className="loading">Searching…</div>}
+
+      {!loading && results.length > 0 && (
+        <div className="grid">
+          {results.map(movie => (
+            <div className="card" key={movie.id}>
+              {movie.poster_path
+                ? <img src={`${IMG_BASE}${movie.poster_path}`} alt={movie.title} />
+                : <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E" alt="" />}
+              <div className="card-body">
+                <div className="card-title">{movie.title}</div>
+                <div className="card-year">{(movie.release_date || "").slice(0, 4) || "—"}</div>
+                {ratings[movie.id]
+                  ? <div className="card-rating">★ {ratings[movie.id].rating.toFixed(1)}</div>
+                  : <button className="log-btn" onClick={() => setModalMovie(movie)}>+ Log &amp; rate</button>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!loading && !error && results.length === 0 && query === "" && (
+        <div className="empty">
+          <div className="display">Search for a movie to get started</div>
+          <div>Once you rate a few, head to the Tonight tab for recommendations.</div>
+        </div>
+      )}
+
+      {modalMovie && (
+        <RatingModal movie={modalMovie} onSave={onRate} onClose={() => setModalMovie(null)} />
+      )}
+    </div>
+  );
+}
+
+function LogTab({ ratings, onRemove, onRate }) {
+  const [editMovie, setEditMovie] = useState(null);
+  const list = Object.values(ratings).sort((a, b) => b.ratedAt - a.ratedAt);
+
+  if (list.length === 0) {
+    return (
+      <div className="empty">
+        <div className="display">Your log is empty</div>
+        <div>Rate movies from the Search tab and they'll show up here.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {list.map(m => (
+        <div className="log-row" key={m.id}>
+          {m.poster_path
+            ? <img src={`${IMG_BASE}${m.poster_path}`} alt={m.title} />
+            : <div style={{width: 46, height: 69, background: "#2A2622", borderRadius: 3, flexShrink: 0}}></div>}
+          <div style={{flex: 1}}>
+            <div className="log-row-title">{m.title}</div>
+            <div className="log-row-meta">{(m.release_date || "").slice(0, 4) || "—"}</div>
+          </div>
+          <div className="log-row-rating" style={{cursor: "pointer"}} onClick={() => setEditMovie(m)}>{m.rating.toFixed(1)}</div>
+          <button className="remove-btn" onClick={() => onRemove(m.id)} title="Remove">✕</button>
+        </div>
+      ))}
+      {editMovie && (
+        <RatingModal movie={editMovie} initial={editMovie.rating} onSave={onRate} onClose={() => setEditMovie(null)} />
+      )}
+    </div>
+  );
+}
+
+function SettingsTab({ services, onChange }) {
+  function toggle(s) {
+    if (services.includes(s)) onChange(services.filter(x => x !== s));
+    else onChange([...services, s]);
+  }
+  return (
+    <div>
+      <div className="setup-notice">
+        <strong>Your streaming services</strong> — used to filter "Tonight" recommendations to what you can actually watch right now.
+      </div>
+      <div className="services-row">
+        {ALL_SERVICES.map(s => (
+          <button key={s} className={`pill ${services.includes(s) ? "selected" : ""}`} onClick={() => toggle(s)}>{s}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Genre id -> name map (TMDB standard movie genres, static so we don't need an extra call)
+const GENRE_MAP = {
+  28: "Action", 12: "Adventure", 16: "Animation", 35: "Comedy", 80: "Crime",
+  99: "Documentary", 18: "Drama", 10751: "Family", 14: "Fantasy", 36: "History",
+  27: "Horror", 10402: "Music", 9648: "Mystery", 10749: "Romance", 878: "Science Fiction",
+  10770: "TV Movie", 53: "Thriller", 10752: "War", 37: "Western"
+};
+
+function TonightTab({ ratings, services, onRate }) {
+  const [mood, setMood] = useState(null);
+  const [runtime, setRuntime] = useState(null);
+  const [recs, setRecs] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const ratedList = Object.values(ratings);
+  const hasEnoughData = ratedList.length >= 3;
+
+  // Build a taste profile: genre -> avg rating weighted by count
+  const genreScores = useMemo(() => {
+    const scores = {};
+    ratedList.forEach(m => {
+      (m.genre_ids || []).forEach(gid => {
+        if (!scores[gid]) scores[gid] = { total: 0, count: 0 };
+        scores[gid].total += m.rating;
+        scores[gid].count += 1;
+      });
+    });
+    const result = {};
+    Object.entries(scores).forEach(([gid, s]) => { result[gid] = s.total / s.count; });
+    return result;
+  }, [ratedList]);
+
+  const topGenreIds = useMemo(() => {
+    return Object.entries(genreScores)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([gid]) => parseInt(gid));
+  }, [genreScores]);
+
+  const moods = [
+    { key: "any", label: "Whatever" },
+    { key: "funny", label: "Funny", genres: [35] },
+    { key: "serious", label: "Serious", genres: [18] },
+    { key: "thriller", label: "Thriller", genres: [53, 9648] },
+    { key: "mindless", label: "Mindless fun", genres: [28, 12] }
+  ];
+  const runtimes = [
+    { key: "90", label: "< 90 min", max: 90 },
+    { key: "120", label: "< 2 hrs", max: 120 },
+    { key: "any", label: "Doesn't matter", max: null }
+  ];
+
+  async function findMovies() {
+    setLoading(true);
+    setError(null);
+    setRecs(null);
+    try {
+      const moodObj = moods.find(m => m.key === mood);
+      const genresToUse = (moodObj && moodObj.genres) ? moodObj.genres : topGenreIds;
+      const genreParam = genresToUse.length ? genresToUse.join(",") : (topGenreIds.join(",") || "18");
+
+      const runtimeObj = runtimes.find(r => r.key === runtime);
+      let url = `${TMDB_BASE}/discover/movie?api_key=${TMDB_KEY}&sort_by=popularity.desc&vote_count.gte=200&vote_average.gte=6.5&with_genres=${genreParam}`;
+      if (runtimeObj && runtimeObj.max) url += `&with_runtime.lte=${runtimeObj.max}`;
+
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.success === false) {
+        setError(data.status_message || "API error.");
+        setLoading(false);
+        return;
+      }
+
+      let candidates = (data.results || []).filter(m => !ratings[m.id]);
+
+      // Score candidates by genre overlap with taste profile
+      candidates = candidates.map(m => {
+        const overlapGenres = (m.genre_ids || []).filter(g => genreScores[g] !== undefined);
+        const tasteBoost = overlapGenres.length
+          ? overlapGenres.reduce((sum, g) => sum + genreScores[g], 0) / overlapGenres.length
+          : m.vote_average;
+        const predicted = Math.min(10, (tasteBoost * 0.7 + m.vote_average * 0.3));
+        return { ...m, predicted };
+      }).sort((a, b) => b.predicted - a.predicted);
+
+      const top = candidates.slice(0, 6);
+
+      // Fetch watch providers for each, filter/annotate by user's services
+      const withProviders = await Promise.all(top.map(async (m) => {
+        try {
+          const pRes = await fetch(`${TMDB_BASE}/movie/${m.id}/watch/providers?api_key=${TMDB_KEY}`);
+          const pData = await pRes.json();
+          const usProviders = pData.results?.US?.flatrate || [];
+          const matchedServices = services.filter(s =>
+            usProviders.some(p => p.provider_name.includes(SERVICE_MATCH[s] || s))
+          );
+          return { ...m, providers: usProviders.map(p => p.provider_name), matchedServices };
+        } catch {
+          return { ...m, providers: [], matchedServices: [] };
+        }
+      }));
+
+      // Prefer ones available on user's services, but show all if none match
+      const onServices = withProviders.filter(m => m.matchedServices.length > 0);
+      const finalRecs = (onServices.length > 0 ? onServices : withProviders).slice(0, 5);
+
+      setRecs(finalRecs);
+    } catch (err) {
+      setError("Couldn't reach TMDB. Check your connection.");
+    }
+    setLoading(false);
+  }
+
+  if (!hasEnoughData) {
+    return (
+      <div className="empty">
+        <div className="display">Rate a few more movies first</div>
+        <div>You've logged {ratedList.length} of 3 needed. Once you rate at least 3, Ledger can learn your taste and recommend something for tonight.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="quiz-card">
+        <div className="quiz-step">
+          <label>Mood</label>
+          <div className="pill-group">
+            {moods.map(m => (
+              <button key={m.key} className={`pill ${mood === m.key ? "selected" : ""}`} onClick={() => setMood(m.key)}>{m.label}</button>
+            ))}
+          </div>
+        </div>
+        <div className="quiz-step">
+          <label>How much time</label>
+          <div className="pill-group">
+            {runtimes.map(r => (
+              <button key={r.key} className={`pill ${runtime === r.key ? "selected" : ""}`} onClick={() => setRuntime(r.key)}>{r.label}</button>
+            ))}
+          </div>
+        </div>
+        <button className="primary" style={{width: "100%"}} onClick={findMovies}>Find me 5 movies</button>
+      </div>
+
+      {loading && <div className="loading">Cross-referencing your taste against what's streaming…</div>}
+      {error && <div className="setup-notice" style={{marginTop: 20}}><strong>Error:</strong> {error}</div>}
+
+      {recs && recs.length === 0 && !loading && (
+        <div className="empty">
+          <div className="display">Nothing matched</div>
+          <div>Try a different mood or runtime.</div>
+        </div>
+      )}
+
+      {recs && recs.length > 0 && (
+        <div style={{marginTop: 24}}>
+          {recs.map(m => (
+            <div className="rec-card" key={m.id}>
+              {m.poster_path
+                ? <img src={`${IMG_BASE}${m.poster_path}`} alt={m.title} />
+                : <div style={{width: 80, height: 120, background: "#2A2622", borderRadius: 4, flexShrink: 0}}></div>}
+              <div style={{flex: 1}}>
+                <div className="rec-title">{m.title}</div>
+                <div className="rec-meta">
+                  {(m.release_date || "").slice(0, 4)} &middot; {(m.genre_ids || []).map(g => GENRE_MAP[g]).filter(Boolean).slice(0,2).join(", ")}
+                </div>
+                <div className="rec-predicted">Predicted for you: {m.predicted.toFixed(1)}</div>
+                <div className="rec-why">TMDB score {m.vote_average.toFixed(1)}. Matched against your top-rated genres.</div>
+                {m.matchedServices && m.matchedServices.length > 0
+                  ? <div className="rec-providers">Streaming on {m.matchedServices.join(", ")}</div>
+                  : <div className="rec-providers" style={{color: "var(--text-dim)"}}>Not confirmed on your services — check availability</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
