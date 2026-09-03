@@ -1,0 +1,1979 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DIALD — Movie Log</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#211A13">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DIALD">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #211A13;
+    --bg-raised: #2C2318;
+    --bg-raised-2: #362B1D;
+    --text: #F2E6D2;
+    --text-dim: #A8987E;
+    --text-faint: #7C6E58;
+    --accent: #E07A3D;
+    --accent-dim: #B85F2C;
+    --accent-bright: #F09258;
+    --sage: #6FA3AE;
+    --gold: #E3B94A;
+    --olive: #B9AE71;
+    --divider: #3D3120;
+    --divider-soft: #332A1B;
+    --danger: #C2604A;
+
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 14px;
+    --radius-pill: 999px;
+
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.25), 0 1px 1px rgba(0,0,0,0.15);
+    --shadow-md: 0 6px 16px rgba(0,0,0,0.32);
+    --shadow-lg: 0 16px 40px rgba(0,0,0,0.45);
+
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --fast: 140ms;
+    --med: 220ms;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    background-image:
+      radial-gradient(circle at 100% 0%, rgba(224,122,61,0.06), transparent 45%),
+      radial-gradient(circle at 0% 100%, rgba(111,163,174,0.05), transparent 40%);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .display {
+    font-family: 'Archivo Black', sans-serif;
+    letter-spacing: 0.005em;
+  }
+
+  #root { max-width: 900px; margin: 0 auto; padding: 28px 20px 100px; }
+
+  /* Header / branding */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding-bottom: 20px;
+    margin-bottom: 28px;
+    position: relative;
+  }
+  .header::after {
+    content: "";
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--sage), var(--olive), var(--gold), var(--accent));
+    border-radius: 2px;
+    opacity: 0.9;
+  }
+  .logo-wordmark {
+    font-size: 40px;
+    line-height: 0.95;
+    letter-spacing: -0.01em;
+  }
+  .logo-d { color: var(--accent); }
+  .tagline {
+    font-size: 10.5px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    margin-top: 6px;
+    font-weight: 700;
+  }
+  .tagline-your { color: var(--sage); }
+  .tagline-diald { color: var(--accent); margin-left: 5px; }
+  .stats {
+    text-align: right;
+    font-size: 12.5px;
+    color: var(--text-dim);
+    padding-top: 2px;
+  }
+  .stats strong {
+    color: var(--accent);
+    font-family: 'Archivo Black', sans-serif;
+    font-size: 22px;
+    display: block;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 2px;
+  }
+
+  /* Tabs — segmented control */
+  .tabs {
+    display: flex;
+    gap: 3px;
+    margin-bottom: 26px;
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-pill);
+    padding: 4px;
+    flex-wrap: wrap;
+  }
+  .tab {
+    flex: 1;
+    min-width: fit-content;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 9px 14px;
+    cursor: pointer;
+    border-radius: var(--radius-pill);
+    transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+    white-space: nowrap;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active {
+    color: #211A13;
+    background: var(--accent);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* Search */
+  .search-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  input[type="text"], select {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    color: var(--text);
+    padding: 11px 14px;
+    font-family: 'Inter', sans-serif;
+    font-size: 14px;
+    border-radius: var(--radius-md);
+    transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+  }
+  input[type="text"] { flex: 1; }
+  input[type="text"]:focus, select:focus {
+    outline: none;
+    border-color: var(--accent-dim);
+    box-shadow: 0 0 0 3px rgba(224,122,61,0.14);
+  }
+  input[type="text"]::placeholder { color: var(--text-faint); }
+
+  button { font-family: 'Inter', sans-serif; }
+
+  button.primary {
+    background: var(--accent);
+    color: #211A13;
+    border: none;
+    padding: 11px 20px;
+    font-weight: 700;
+    font-size: 14px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background var(--fast) var(--ease), transform var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+    box-shadow: var(--shadow-sm);
+  }
+  button.primary:hover { background: var(--accent-bright); box-shadow: var(--shadow-md); }
+  button.primary:active { transform: scale(0.97); }
+  button.primary:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
+
+  button.primary, button.ghost, .card button.log-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  button.ghost {
+    background: none;
+    border: 1px solid var(--divider);
+    color: var(--text-dim);
+    padding: 10px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease), background var(--fast) var(--ease);
+  }
+  button.ghost:hover { border-color: var(--text-dim); color: var(--text); background: rgba(255,255,255,0.02); }
+  button.ghost:active { transform: scale(0.97); }
+  button.ghost:disabled { opacity: 0.5; cursor: default; }
+
+  /* Grid of results/log */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    background: var(--bg-raised);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    border: 1px solid var(--divider);
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--med) var(--ease), box-shadow var(--med) var(--ease), border-color var(--med) var(--ease);
+  }
+  .card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-md);
+    border-color: var(--divider-soft);
+  }
+  .card img {
+    width: 100%;
+    aspect-ratio: 2/3;
+    object-fit: cover;
+    display: block;
+    background: var(--divider);
+    transition: opacity var(--med) var(--ease);
+  }
+  .poster-wrap { position: relative; cursor: pointer; }
+  .poster-wrap img { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block; background: var(--divider); border-radius: inherit; }
+  .badge-tmdb {
+    position: absolute;
+    top: 8px; left: 8px;
+    background: rgba(15,11,7,0.82);
+    backdrop-filter: blur(3px);
+    border-radius: var(--radius-sm);
+    padding: 3px 7px;
+    font-family: 'Archivo Black', sans-serif;
+    font-size: 12px;
+    line-height: 1;
+  }
+  .badge-tmdb.tier-high { color: #8FCB7E; }
+  .badge-tmdb.tier-mid { color: var(--gold); }
+  .badge-tmdb.tier-low { color: var(--text-dim); }
+  .badge-user {
+    position: absolute;
+    top: 8px; right: 8px;
+    background: var(--accent);
+    color: #211A13;
+    border-radius: var(--radius-sm);
+    padding: 3px 8px;
+    font-family: 'Archivo Black', sans-serif;
+    font-size: 12.5px;
+    line-height: 1;
+    box-shadow: var(--shadow-sm);
+  }
+  .card-body { padding: 12px; }
+  .card-title { font-size: 13px; font-weight: 700; line-height: 1.35; margin-bottom: 3px; }
+  .card-year { font-size: 11px; color: var(--text-dim); margin-bottom: 5px; font-variant-numeric: tabular-nums; }
+  .card-rating {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: 17px;
+    color: var(--accent);
+  }
+  .card button.log-btn {
+    width: 100%;
+    margin-top: 8px;
+    background: none;
+    border: 1px solid var(--divider);
+    color: var(--text-dim);
+    padding: 7px;
+    font-size: 11.5px;
+    font-weight: 700;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease);
+  }
+  .card button.log-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Cert badge */
+  .cert-badge {
+    display: inline-block;
+    font-size: 9.5px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-sm);
+    padding: 1.5px 5px;
+    margin-left: 6px;
+    vertical-align: middle;
+  }
+
+  /* Platform badges */
+  .platform-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
+  .platform-chip {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--sage);
+    border: 1px solid rgba(111,163,174,0.4);
+    border-radius: var(--radius-pill);
+    padding: 3px 9px;
+    cursor: pointer;
+    background: rgba(111,163,174,0.08);
+    transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease);
+  }
+  .platform-chip:hover { background: rgba(111,163,174,0.22); border-color: var(--sage); }
+  .platform-chip.none { color: var(--text-faint); border-color: var(--divider); cursor: default; background: none; }
+
+  /* Log list view */
+  .log-row {
+    display: flex;
+    gap: 14px;
+    padding: 13px 8px;
+    border-bottom: 1px solid var(--divider-soft);
+    align-items: center;
+    border-radius: var(--radius-md);
+    transition: background var(--fast) var(--ease);
+  }
+  .log-row:hover { background: rgba(255,255,255,0.015); }
+  .log-row img {
+    width: 46px; height: 69px;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    flex-shrink: 0;
+    background: var(--divider);
+    box-shadow: var(--shadow-sm);
+  }
+  .log-row-title { font-weight: 700; font-size: 14px; }
+  .log-row-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .log-row-rating {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: 21px;
+    color: var(--accent);
+    margin-left: auto;
+    padding-right: 12px;
+  }
+  .log-row .remove-btn {
+    background: none; border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 17px;
+    padding: 5px 9px;
+    border-radius: var(--radius-sm);
+    transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+  }
+  .log-row .remove-btn:hover { color: var(--danger); background: rgba(194,96,74,0.1); }
+
+  /* Empty state */
+  .empty { text-align: center; padding: 64px 20px; color: var(--text-dim); }
+  .empty .display { font-size: 22px; color: var(--text); margin-bottom: 8px; }
+  .empty > div:last-child { font-size: 13.5px; line-height: 1.5; max-width: 340px; margin: 0 auto; }
+
+  /* Modals */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(10,7,4,0.7);
+    backdrop-filter: blur(3px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    padding: 20px;
+    animation: overlayIn var(--med) var(--ease);
+  }
+  @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
+  .modal {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-lg);
+    padding: 26px;
+    max-width: 380px;
+    width: 100%;
+    position: relative;
+    box-shadow: var(--shadow-lg);
+    animation: modalIn var(--med) var(--ease);
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .modal h3 { font-size: 20px; margin-bottom: 4px; }
+  .modal .modal-sub { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+  .modal label { display: block; font-size: 12px; font-weight: 700; color: var(--text-dim); margin-bottom: 6px; margin-top: 14px; }
+  .rating-input-row { display: flex; align-items: center; gap: 12px; }
+  input[type="range"] { flex: 1; accent-color: var(--accent); height: 4px; }
+  .rating-display {
+    font-family: 'Archivo Black', sans-serif;
+    font-size: 26px;
+    color: var(--accent);
+    min-width: 56px;
+    font-variant-numeric: tabular-nums;
+  }
+  .modal-actions { display: flex; gap: 8px; margin-top: 24px; }
+  .modal-actions button { flex: 1; }
+
+  .modal-close-x {
+    position: absolute;
+    top: 12px; right: 12px;
+    background: rgba(255,255,255,0.04);
+    border: none;
+    color: var(--text-dim);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 7px;
+    border-radius: 50%;
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+  }
+  .modal-close-x:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+
+  /* Cast */
+  .cast-section-label { display: block; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 9px; margin-top: 16px; }
+  .cast-person { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; }
+  .cast-photo { width: 34px; height: 34px; border-radius: 50%; object-fit: cover; flex-shrink: 0; background: var(--divider); border: 1px solid var(--divider-soft); }
+  .cast-role { font-size: 12px; color: var(--text-dim); }
+  .cast-chip {
+    font-size: 12.5px; font-weight: 600;
+    background: var(--bg);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-pill);
+    padding: 4px 11px;
+    color: var(--text);
+    cursor: pointer;
+    transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease), background var(--fast) var(--ease);
+  }
+  .cast-chip:hover { border-color: var(--accent); color: var(--accent); background: rgba(224,122,61,0.06); }
+
+  /* Quiz / filters */
+  .quiz-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-lg);
+    padding: 26px;
+    box-shadow: var(--shadow-sm);
+  }
+  .quiz-step { margin-bottom: 24px; }
+  .quiz-step label { display: block; font-size: 12.5px; font-weight: 700; color: var(--text-dim); margin-bottom: 10px; }
+  .pill-group { display: flex; flex-wrap: wrap; gap: 8px; }
+  .pill {
+    background: none;
+    border: 1px solid var(--divider);
+    color: var(--text-dim);
+    padding: 8px 15px;
+    border-radius: var(--radius-pill);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease), background var(--fast) var(--ease), transform var(--fast) var(--ease);
+  }
+  .pill:hover { border-color: var(--text-dim); }
+  .pill:active { transform: scale(0.96); }
+  .pill.selected {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(224,122,61,0.12);
+  }
+
+  .services-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+
+  .rec-card {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    display: flex;
+    gap: 18px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow var(--med) var(--ease), border-color var(--med) var(--ease);
+  }
+  .rec-card:hover { box-shadow: var(--shadow-md); border-color: var(--divider-soft); }
+  .rec-card img { width: 80px; height: 120px; object-fit: cover; border-radius: var(--radius-md); flex-shrink: 0; background: var(--divider); box-shadow: var(--shadow-sm); }
+  .rec-title { font-size: 18px; font-weight: 700; font-family: 'Archivo Black', sans-serif; }
+  .rec-meta { font-size: 12px; color: var(--text-dim); margin: 5px 0 9px; }
+  .rec-predicted {
+    display: inline-block;
+    background: rgba(224,122,61,0.15);
+    color: var(--accent);
+    font-family: 'Archivo Black', sans-serif;
+    font-size: 13.5px;
+    padding: 3px 9px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 9px;
+  }
+  .rec-why { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+
+  .loading { text-align: center; padding: 48px; color: var(--text-dim); font-size: 13.5px; }
+
+  .setup-notice {
+    background: var(--bg-raised);
+    border: 1px solid var(--divider);
+    border-left: 3px solid var(--accent-dim);
+    border-radius: var(--radius-md);
+    padding: 15px 18px;
+    margin-bottom: 20px;
+    font-size: 13px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .setup-notice strong { color: var(--text); }
+  .setup-notice input { margin-top: 10px; width: 100%; }
+
+  .see-more-row { text-align: center; margin-top: 18px; }
+
+  /* Autocomplete */
+  .search-row { position: relative; }
+  .autocomplete-dropdown {
+    position: absolute;
+    top: 100%; left: 0; right: 76px;
+    background: var(--bg-raised-2);
+    border: 1px solid var(--divider);
+    border-radius: var(--radius-md);
+    max-height: 280px;
+    overflow-y: auto;
+    z-index: 30;
+    margin-top: 6px;
+    box-shadow: var(--shadow-lg);
+    animation: dropIn var(--fast) var(--ease);
+  }
+  @keyframes dropIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  .autocomplete-item {
+    padding: 9px 11px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    transition: background var(--fast) var(--ease);
+  }
+  .autocomplete-item:hover { background: rgba(255,255,255,0.04); }
+  .autocomplete-item img { width: 30px; height: 30px; border-radius: var(--radius-sm); object-fit: cover; flex-shrink: 0; background: var(--divider); }
+  .autocomplete-item .ac-sub { color: var(--text-dim); font-size: 11px; }
+
+  /* Scroll to top */
+  .scroll-top-btn {
+    position: fixed;
+    bottom: 26px; right: 26px;
+    background: var(--accent);
+    color: #211A13;
+    border: none;
+    width: 48px; height: 48px;
+    border-radius: 50%;
+    font-size: 18px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: var(--shadow-lg);
+    z-index: 45;
+    transition: background var(--fast) var(--ease), transform var(--fast) var(--ease);
+    animation: popIn var(--med) var(--ease);
+  }
+  @keyframes popIn { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: scale(1); } }
+  .scroll-top-btn:hover { background: var(--accent-bright); transform: translateY(-2px); }
+
+  ::-webkit-scrollbar { width: 9px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--divider); border-radius: 5px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--divider-soft); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script>
+"use strict";
+const { useState, useEffect, useMemo, useCallback, useRef } = React;
+const TMDB_KEY = "4fe436126b74b259d9bce25cb5855e94";
+const TMDB_BASE = "https://api.themoviedb.org/3";
+const IMG_BASE = "https://image.tmdb.org/t/p/w342";
+const PROFILE_BASE = "https://image.tmdb.org/t/p/w185";
+const SUPABASE_URL = "https://ittycvjbrtnozbwhexnu.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml0dHljdmpicnRub3pid2hleG51Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzMjAxMTAsImV4cCI6MjEwMzg5NjExMH0.eTyztvhOacOPH47Qa5ujcM25Cvf3N8x89nSm5UB1PKU";
+const supabaseClient = (window.supabase && window.supabase.createClient)
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
+const ALL_SERVICES = ["Netflix", "Prime Video", "Max", "Hulu", "Disney Plus", "Apple TV Plus", "Peacock", "Paramount Plus", "Tubi", "Pluto TV", "Starz", "Showtime", "Sling TV"];
+const PROVIDER_IDS = {
+    "Netflix": 8,
+    "Prime Video": 9,
+    "Max": 384,
+    "Hulu": 15,
+    "Disney Plus": 337,
+    "Apple TV Plus": 350,
+    "Peacock": 386,
+    "Paramount Plus": 531,
+    "Tubi": 73,
+    "Pluto TV": 300,
+    "Starz": 43,
+    "Showtime": 37,
+    "Sling TV": 299
+};
+function canonicalProviderName(name) {
+    if (!name)
+        return name;
+    if (name.indexOf("Netflix") !== -1)
+        return "Netflix";
+    if (name.indexOf("Prime Video") !== -1 || name.indexOf("Amazon") !== -1)
+        return "Prime Video";
+    if (name.indexOf("HBO Max") !== -1 || name === "Max")
+        return "Max";
+    if (name.indexOf("Hulu") !== -1)
+        return "Hulu";
+    if (name.indexOf("Disney") !== -1)
+        return "Disney Plus";
+    if (name.indexOf("Apple TV") !== -1)
+        return "Apple TV Plus";
+    if (name.indexOf("Peacock") !== -1)
+        return "Peacock";
+    if (name.indexOf("Paramount") !== -1)
+        return "Paramount Plus";
+    if (name.indexOf("Tubi") !== -1)
+        return "Tubi";
+    if (name.indexOf("Pluto") !== -1)
+        return "Pluto TV";
+    if (name.indexOf("Starz") !== -1)
+        return "Starz";
+    return name;
+}
+function dedupeProviders(rawList) {
+    const seen = {};
+    const out = [];
+    rawList.forEach(p => {
+        const canonical = canonicalProviderName(p.provider_name || p.name);
+        if (!seen[canonical]) {
+            seen[canonical] = true;
+            out.push({ id: p.provider_id || p.id, name: canonical });
+        }
+    });
+    return out;
+}
+const DECADES = [
+    { key: "1930s", label: "30s", gte: "1930-01-01", lte: "1939-12-31" },
+    { key: "1940s", label: "40s", gte: "1940-01-01", lte: "1949-12-31" },
+    { key: "1950s", label: "50s", gte: "1950-01-01", lte: "1959-12-31" },
+    { key: "1960s", label: "60s", gte: "1960-01-01", lte: "1969-12-31" },
+    { key: "1970s", label: "70s", gte: "1970-01-01", lte: "1979-12-31" },
+    { key: "1980s", label: "80s", gte: "1980-01-01", lte: "1989-12-31" },
+    { key: "1990s", label: "90s", gte: "1990-01-01", lte: "1999-12-31" },
+    { key: "2000s", label: "2000s", gte: "2000-01-01", lte: "2009-12-31" },
+    { key: "2010s", label: "2010s", gte: "2010-01-01", lte: "2019-12-31" },
+    { key: "2020s", label: "2020s", gte: "2020-01-01", lte: "2029-12-31" }
+];
+const GENRE_MAP = {
+    28: "Action", 12: "Adventure", 16: "Animation", 35: "Comedy", 80: "Crime",
+    99: "Documentary", 18: "Drama", 10751: "Family", 14: "Fantasy", 36: "History",
+    27: "Horror", 10402: "Music", 9648: "Mystery", 10749: "Romance", 878: "Science Fiction",
+    10770: "TV Movie", 53: "Thriller", 10752: "War", 37: "Western"
+};
+function weightedCreditScore(m) {
+    const voteCount = m.vote_count || 0;
+    const voteAvg = m.vote_average || 0;
+    return voteAvg * Math.log10(voteCount + 1);
+}
+function ratingTier(score) {
+    if (!score)
+        return "mid";
+    if (score >= 7)
+        return "high";
+    if (score >= 5)
+        return "mid";
+    return "low";
+}
+function loadState() {
+    try {
+        const raw = localStorage.getItem("ledger_state_v1");
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            return {
+                ratings: parsed.ratings || {},
+                notForMeIds: parsed.notForMeIds || [],
+                excludedGenres: parsed.excludedGenres || [],
+                queue: parsed.queue || {},
+                genreDislikeCounts: parsed.genreDislikeCounts || {}
+            };
+        }
+    }
+    catch (e) { }
+    return { ratings: {}, notForMeIds: [], excludedGenres: [], queue: {}, genreDislikeCounts: {} };
+}
+async function fetchMovieMeta(movieId) {
+    try {
+        const res = await fetch(`${TMDB_BASE}/movie/${movieId}?api_key=${TMDB_KEY}&append_to_response=release_dates,watch/providers`);
+        const data = await res.json();
+        if (data.success === false)
+            return { certification: null, providers: [] };
+        const usRelease = (data.release_dates && data.release_dates.results || []).find(r => r.iso_3166_1 === "US");
+        const certEntry = usRelease && (usRelease.release_dates || []).find(rd => rd.certification);
+        const certification = certEntry && certEntry.certification ? certEntry.certification : null;
+        const wp = data["watch/providers"];
+        const rawProviders = (wp && wp.results && wp.results.US && wp.results.US.flatrate) || [];
+        const providers = dedupeProviders(rawProviders);
+        return { certification, providers };
+    }
+    catch (_a) {
+        return { certification: null, providers: [] };
+    }
+}
+function useMovieMeta(items) {
+    const [metaCache, setMetaCache] = useState({});
+    useEffect(() => {
+        const ids = items.map(m => m.id).filter(id => metaCache[id] === undefined);
+        if (ids.length === 0)
+            return;
+        let cancelled = false;
+        ids.forEach(id => {
+            fetchMovieMeta(id).then(meta => {
+                if (!cancelled)
+                    setMetaCache(prev => (prev[id] !== undefined ? prev : { ...prev, [id]: meta }));
+            });
+        });
+        return () => { cancelled = true; };
+    }, [items]);
+    return metaCache;
+}
+function CertBadge({ meta }) {
+    if (!meta || !meta.certification)
+        return null;
+    return React.createElement("span", { className: "cert-badge" }, meta.certification);
+}
+function PlatformBadges({ meta, onPlatformClick }) {
+    if (!meta)
+        return null;
+    if (!meta.providers || meta.providers.length === 0) {
+        return React.createElement("div", { className: "platform-badges" },
+            React.createElement("span", { className: "platform-chip none" }, "Not streaming (US)"));
+    }
+    return (React.createElement("div", { className: "platform-badges" }, meta.providers.map(p => (React.createElement("span", { key: p.name, className: "platform-chip", onClick: (e) => { e.stopPropagation(); onPlatformClick(p.id, p.name); } }, p.name)))));
+}
+function IconPlay({ size = 12 }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "currentColor", style: { display: "inline-block", verticalAlign: "-1px", marginRight: 5 } },
+        React.createElement("path", { d: "M8 5v14l11-7z" }));
+}
+function IconX({ size = 14 }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", style: { display: "inline-block", verticalAlign: "-2px" } },
+        React.createElement("line", { x1: "18", y1: "6", x2: "6", y2: "18" }),
+        React.createElement("line", { x1: "6", y1: "6", x2: "18", y2: "18" }));
+}
+function IconBookmark({ size = 13, filled = false }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: "2", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-2px", marginRight: 5 } },
+        React.createElement("path", { d: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" }));
+}
+function IconBan({ size = 13 }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", style: { display: "inline-block", verticalAlign: "-2px", marginRight: 5 } },
+        React.createElement("circle", { cx: "12", cy: "12", r: "9" }),
+        React.createElement("line", { x1: "5.8", y1: "18.2", x2: "18.2", y2: "5.8" }));
+}
+function IconHelp({ size = 13 }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-2px", marginRight: 5 } },
+        React.createElement("path", { d: "M9.1 9a3 3 0 1 1 5.8 1c0 2-3 2-3 4" }),
+        React.createElement("circle", { cx: "12", cy: "17.2", r: "0.6", fill: "currentColor", stroke: "none" }));
+}
+function IconArrowLeft({ size = 14 }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.2", strokeLinecap: "round", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-2px", marginRight: 5 } },
+        React.createElement("line", { x1: "19", y1: "12", x2: "5", y2: "12" }),
+        React.createElement("polyline", { points: "12 19 5 12 12 5" }));
+}
+function IconArrowUp({ size = 20 }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2.4", strokeLinecap: "round", strokeLinejoin: "round" },
+        React.createElement("line", { x1: "12", y1: "19", x2: "12", y2: "5" }),
+        React.createElement("polyline", { points: "5 12 12 5 19 12" }));
+}
+function IconStar({ size = 13, filled = true }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: "1.5", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-2px", marginRight: 5 } },
+        React.createElement("polygon", { points: "12 2.5 15.1 8.8 22 9.8 17 14.6 18.2 21.5 12 18.2 5.8 21.5 7 14.6 2 9.8 8.9 8.8" }));
+}
+function ScrollToTop() {
+    const [show, setShow] = useState(false);
+    useEffect(() => {
+        function onScroll() { setShow(window.scrollY > 400); }
+        window.addEventListener("scroll", onScroll);
+        return () => window.removeEventListener("scroll", onScroll);
+    }, []);
+    if (!show)
+        return null;
+    return (React.createElement("button", { className: "scroll-top-btn", onClick: () => window.scrollTo({ top: 0, behavior: "smooth" }), title: "Back to top" },
+        React.createElement(IconArrowUp, null)));
+}
+function App() {
+    const [state, setState] = useState(loadState());
+    const [tab, setTab] = useState("search");
+    const [navRequest, setNavRequest] = useState(null);
+    const [session, setSession] = useState(undefined); // undefined = checking, null = logged out
+    const [showAuthModal, setShowAuthModal] = useState(false);
+    const [syncing, setSyncing] = useState(false);
+    useEffect(() => {
+        if (!supabaseClient) {
+            setSession(null);
+            return;
+        }
+        supabaseClient.auth.getSession().then(({ data }) => setSession(data.session || null));
+        const { data: listener } = supabaseClient.auth.onAuthStateChange((_event, newSession) => {
+            setSession(newSession);
+        });
+        return () => { if (listener && listener.subscription)
+            listener.subscription.unsubscribe(); };
+    }, []);
+    useEffect(() => {
+        if (!session || !supabaseClient)
+            return;
+        (async () => {
+            const { data } = await supabaseClient.from("user_data").select("state").eq("user_id", session.user.id).maybeSingle();
+            if (data && data.state && Object.keys(data.state).length > 0) {
+                setState(data.state);
+            }
+            else {
+                await supabaseClient.from("user_data").upsert({ user_id: session.user.id, state, updated_at: new Date().toISOString() });
+            }
+        })();
+        // eslint-disable-next-line
+    }, [session]);
+    useEffect(() => {
+        try {
+            localStorage.setItem("ledger_state_v1", JSON.stringify(state));
+        }
+        catch (e) { }
+        if (session && supabaseClient) {
+            setSyncing(true);
+            const t = setTimeout(() => {
+                supabaseClient.from("user_data").upsert({ user_id: session.user.id, state, updated_at: new Date().toISOString() }).then(() => setSyncing(false));
+            }, 900);
+            return () => clearTimeout(t);
+        }
+    }, [state, session]);
+    async function handleSignOut() {
+        if (supabaseClient)
+            await supabaseClient.auth.signOut();
+        setSession(null);
+    }
+    const ratingsCount = Object.keys(state.ratings).length;
+    const avgRating = ratingsCount
+        ? (Object.values(state.ratings).reduce((a, r) => a + r.rating, 0) / ratingsCount).toFixed(1)
+        : "—";
+    function addRating(movie, rating) {
+        setState(prev => ({
+            ...prev,
+            ratings: {
+                ...prev.ratings,
+                [movie.id]: {
+                    id: movie.id,
+                    title: movie.title,
+                    release_date: movie.release_date,
+                    poster_path: movie.poster_path,
+                    genre_ids: movie.genre_ids || (movie.genres && movie.genres.map(g => g.id)) || [],
+                    vote_average: movie.vote_average,
+                    runtime: movie.runtime,
+                    rating: rating,
+                    ratedAt: Date.now()
+                }
+            }
+        }));
+    }
+    function removeRating(id) {
+        setState(prev => {
+            const next = { ...prev.ratings };
+            delete next[id];
+            return { ...prev, ratings: next };
+        });
+    }
+    function addNotForMe(movie) {
+        const movieId = typeof movie === "object" ? movie.id : movie;
+        const genreIds = typeof movie === "object" ? (movie.genre_ids || []) : [];
+        setState(prev => {
+            const nextGenreDislikes = { ...(prev.genreDislikeCounts || {}) };
+            genreIds.forEach(g => { nextGenreDislikes[g] = (nextGenreDislikes[g] || 0) + 1; });
+            return {
+                ...prev,
+                notForMeIds: prev.notForMeIds.indexOf(movieId) === -1 ? prev.notForMeIds.concat([movieId]) : prev.notForMeIds,
+                genreDislikeCounts: nextGenreDislikes
+            };
+        });
+    }
+    function addExcludedGenre(genreId) {
+        setState(prev => ({
+            ...prev,
+            excludedGenres: prev.excludedGenres.indexOf(genreId) === -1 ? prev.excludedGenres.concat([genreId]) : prev.excludedGenres
+        }));
+    }
+    function removeExcludedGenre(genreId) {
+        setState(prev => ({ ...prev, excludedGenres: prev.excludedGenres.filter(g => g !== genreId) }));
+    }
+    function addToQueue(movie) {
+        setState(prev => ({
+            ...prev,
+            queue: {
+                ...prev.queue,
+                [movie.id]: {
+                    id: movie.id,
+                    title: movie.title,
+                    release_date: movie.release_date,
+                    poster_path: movie.poster_path,
+                    genre_ids: movie.genre_ids || (movie.genres && movie.genres.map(g => g.id)) || [],
+                    vote_average: movie.vote_average,
+                    savedAt: Date.now()
+                }
+            }
+        }));
+    }
+    function removeFromQueue(id) {
+        setState(prev => {
+            const next = { ...prev.queue };
+            delete next[id];
+            return { ...prev, queue: next };
+        });
+    }
+    function handlePlatformClick(providerId, providerName) {
+        setNavRequest({ type: "platform", id: providerId, name: providerName, token: Date.now() });
+        setTab("search");
+    }
+    function handleActorClick(personId, personName, asDirector) {
+        setNavRequest({ type: "actor", id: personId, name: personName, asDirector: !!asDirector, token: Date.now() });
+        setTab("search");
+    }
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "header" },
+            React.createElement("div", null,
+                React.createElement("h1", { className: "display logo-wordmark" },
+                    "DIAL",
+                    React.createElement("span", { className: "logo-d" }, "D")),
+                React.createElement("div", { className: "tagline" },
+                    React.createElement("span", { className: "tagline-your" }, "Your taste."),
+                    React.createElement("span", { className: "tagline-diald" }, "Diald in."))),
+            React.createElement("div", { style: { textAlign: "right" } },
+                React.createElement("div", { className: "stats" },
+                    React.createElement("strong", null, ratingsCount),
+                    "logged \u00B7 avg ",
+                    avgRating),
+                React.createElement("div", { style: { marginTop: 8 } }, session === undefined ? null : session ? (React.createElement("div", { style: { fontSize: 11.5, color: "var(--text-dim)" } },
+                    syncing ? "Syncing…" : `Synced as ${session.user.email}`,
+                    " ",
+                    React.createElement("span", { className: "cast-chip", style: { padding: "2px 8px", fontSize: 11 }, onClick: handleSignOut }, "Sign out"))) : (React.createElement("button", { className: "ghost", style: { padding: "6px 12px", fontSize: 12 }, onClick: () => setShowAuthModal(true) }, "Log in to sync"))))),
+        showAuthModal && React.createElement(AuthModal, { onClose: () => setShowAuthModal(false) }),
+        React.createElement("div", { className: "tabs" },
+            React.createElement("button", { className: `tab ${tab === "search" ? "active" : ""}`, onClick: () => setTab("search") }, "Search"),
+            React.createElement("button", { className: `tab ${tab === "log" ? "active" : ""}`, onClick: () => setTab("log") }, "My Log"),
+            React.createElement("button", { className: `tab ${tab === "queue" ? "active" : ""}`, onClick: () => setTab("queue") }, "My Queue"),
+            React.createElement("button", { className: `tab ${tab === "tonight" ? "active" : ""}`, onClick: () => setTab("tonight") }, "Tonight")),
+        tab === "search" && (React.createElement(SearchTab, { ratings: state.ratings, onRate: addRating, navRequest: navRequest, onConsumeNav: () => setNavRequest(null), onPlatformClick: handlePlatformClick, onActorClick: handleActorClick, queue: state.queue, onAddToQueue: addToQueue, onRemoveFromQueue: removeFromQueue })),
+        tab === "log" && (React.createElement(LogTab, { ratings: state.ratings, onRemove: removeRating, onRate: addRating, onPlatformClick: handlePlatformClick, onActorClick: handleActorClick })),
+        tab === "queue" && (React.createElement(QueueTab, { queue: state.queue, ratings: state.ratings, onRemoveFromQueue: removeFromQueue, onRate: addRating, onPlatformClick: handlePlatformClick, onActorClick: handleActorClick })),
+        tab === "tonight" && (React.createElement(TonightTab, { ratings: state.ratings, onRate: addRating, onPlatformClick: handlePlatformClick, onActorClick: handleActorClick, notForMeIds: state.notForMeIds, onAddNotForMe: addNotForMe, excludedGenres: state.excludedGenres, onAddExcludedGenre: addExcludedGenre, onRemoveExcludedGenre: removeExcludedGenre, genreDislikeCounts: state.genreDislikeCounts, queue: state.queue, onAddToQueue: addToQueue, onRemoveFromQueue: removeFromQueue })),
+        React.createElement(ScrollToTop, null)));
+}
+function RatingModal({ movie, onSave, onClose, initial }) {
+    const [rating, setRating] = useState(initial || 8.0);
+    return (React.createElement("div", { className: "modal-overlay", onClick: onClose },
+        React.createElement("div", { className: "modal", onClick: e => e.stopPropagation() },
+            React.createElement("button", { className: "modal-close-x", onClick: onClose },
+                React.createElement(IconX, { size: 15 })),
+            React.createElement("h3", { className: "display" }, movie.title),
+            React.createElement("div", { className: "modal-sub" }, (movie.release_date || "").slice(0, 4)),
+            React.createElement("label", null, "Your rating"),
+            React.createElement("div", { className: "rating-input-row" },
+                React.createElement("input", { type: "range", min: "0", max: "10", step: "0.1", value: rating, onChange: e => setRating(parseFloat(e.target.value)) }),
+                React.createElement("div", { className: "rating-display" }, rating.toFixed(1))),
+            React.createElement("div", { className: "modal-actions" },
+                React.createElement("button", { className: "primary", style: { width: "100%" }, onClick: () => { onSave(movie, rating); onClose(); } }, "Save rating")))));
+}
+function AuthModal({ onClose }) {
+    const [mode, setMode] = useState("login"); // "login" | "signup"
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
+    const [error, setError] = useState(null);
+    const [message, setMessage] = useState(null);
+    const [loading, setLoading] = useState(false);
+    async function handleSubmit(e) {
+        e.preventDefault();
+        if (!supabaseClient) {
+            setError("Login isn't available right now.");
+            return;
+        }
+        setLoading(true);
+        setError(null);
+        setMessage(null);
+        try {
+            if (mode === "signup") {
+                const { error: err } = await supabaseClient.auth.signUp({ email, password });
+                if (err)
+                    throw err;
+                setMessage("Check your email to confirm your account, then log in.");
+            }
+            else {
+                const { error: err } = await supabaseClient.auth.signInWithPassword({ email, password });
+                if (err)
+                    throw err;
+                onClose();
+            }
+        }
+        catch (err) {
+            setError(err.message || "Something went wrong.");
+        }
+        setLoading(false);
+    }
+    return (React.createElement("div", { className: "modal-overlay", onClick: onClose },
+        React.createElement("div", { className: "modal", onClick: e => e.stopPropagation() },
+            React.createElement("button", { className: "modal-close-x", onClick: onClose },
+                React.createElement(IconX, { size: 15 })),
+            React.createElement("h3", { className: "display" }, mode === "signup" ? "Create account" : "Log in"),
+            React.createElement("div", { className: "modal-sub" }, "Sync your ratings and queue across every device."),
+            React.createElement("form", { onSubmit: handleSubmit },
+                React.createElement("label", null, "Email"),
+                React.createElement("input", { type: "email", value: email, onChange: e => setEmail(e.target.value), required: true, style: { width: "100%" } }),
+                React.createElement("label", null, "Password"),
+                React.createElement("input", { type: "password", value: password, onChange: e => setPassword(e.target.value), required: true, minLength: 6, style: { width: "100%" } }),
+                error && React.createElement("div", { className: "setup-notice", style: { marginTop: 14 } },
+                    React.createElement("strong", null, "Error:"),
+                    " ",
+                    error),
+                message && React.createElement("div", { className: "setup-notice", style: { marginTop: 14 } }, message),
+                React.createElement("div", { className: "modal-actions" },
+                    React.createElement("button", { type: "submit", className: "primary", style: { width: "100%" }, disabled: loading }, loading ? "Please wait…" : (mode === "signup" ? "Sign up" : "Log in")))),
+            React.createElement("div", { style: { textAlign: "center", marginTop: 16, fontSize: 13, color: "var(--text-dim)" } }, mode === "signup"
+                ? React.createElement(React.Fragment, null,
+                    "Already have an account?",
+                    " ",
+                    React.createElement("span", { className: "cast-chip", onClick: () => { setMode("login"); setError(null); setMessage(null); } }, "Log in"))
+                : React.createElement(React.Fragment, null,
+                    "New here?",
+                    " ",
+                    React.createElement("span", { className: "cast-chip", onClick: () => { setMode("signup"); setError(null); setMessage(null); } }, "Create account"))))));
+}
+async function fetchTrailerKey(movieId) {
+    try {
+        const res = await fetch(`${TMDB_BASE}/movie/${movieId}/videos?api_key=${TMDB_KEY}`);
+        const data = await res.json();
+        const vids = data.results || [];
+        const official = vids.find(v => v.site === "YouTube" && v.type === "Trailer" && v.official);
+        const anyTrailer = vids.find(v => v.site === "YouTube" && v.type === "Trailer");
+        const anyVideo = vids.find(v => v.site === "YouTube");
+        const pick = official || anyTrailer || anyVideo;
+        return pick ? pick.key : null;
+    }
+    catch (_a) {
+        return null;
+    }
+}
+function TrailerModal({ movie, onClose }) {
+    const [key, setKey] = useState(undefined);
+    useEffect(() => {
+        let cancelled = false;
+        fetchTrailerKey(movie.id).then(k => { if (!cancelled)
+            setKey(k); });
+        return () => { cancelled = true; };
+    }, [movie.id]);
+    return (React.createElement("div", { className: "modal-overlay", onClick: onClose },
+        React.createElement("div", { className: "modal", style: { maxWidth: 640 }, onClick: e => e.stopPropagation() },
+            React.createElement("button", { className: "modal-close-x", onClick: onClose },
+                React.createElement(IconX, { size: 15 })),
+            React.createElement("h3", { className: "display" }, movie.title),
+            React.createElement("div", { className: "modal-sub", style: { marginBottom: 16 } }, (movie.release_date || "").slice(0, 4)),
+            key === undefined && React.createElement("div", { className: "loading" }, "Looking for a trailer\u2026"),
+            key === null && React.createElement("div", { className: "loading" }, "No trailer found for this one."),
+            key && (React.createElement("div", { style: { position: "relative", width: "100%", paddingTop: "56.25%", borderRadius: 4, overflow: "hidden" } },
+                React.createElement("iframe", { src: `https://www.youtube.com/embed/${key}`, title: "Trailer", frameBorder: "0", allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture", allowFullScreen: true, style: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%" } }))))));
+}
+async function fetchMovieDetails(movieId) {
+    try {
+        const res = await fetch(`${TMDB_BASE}/movie/${movieId}?api_key=${TMDB_KEY}&append_to_response=credits,release_dates,watch/providers`);
+        const data = await res.json();
+        if (data.success === false)
+            return null;
+        return data;
+    }
+    catch (_a) {
+        return null;
+    }
+}
+function MovieDetailModal({ movieId, onClose, onRate, onTrailer, ratings, onActorClick, onPlatformClick, queue, onAddToQueue }) {
+    const [details, setDetails] = useState(undefined);
+    useEffect(() => {
+        let cancelled = false;
+        fetchMovieDetails(movieId).then(d => { if (!cancelled)
+            setDetails(d); });
+        return () => { cancelled = true; };
+    }, [movieId]);
+    const isRated = details && ratings[details.id];
+    const certification = useMemo(() => {
+        if (!details || !details.release_dates)
+            return null;
+        const usRelease = (details.release_dates.results || []).find(r => r.iso_3166_1 === "US");
+        const certEntry = usRelease && (usRelease.release_dates || []).find(rd => rd.certification);
+        return certEntry && certEntry.certification ? certEntry.certification : null;
+    }, [details]);
+    const providers = useMemo(() => {
+        if (!details)
+            return [];
+        const wp = details["watch/providers"];
+        const raw = (wp && wp.results && wp.results.US && wp.results.US.flatrate) || [];
+        return dedupeProviders(raw);
+    }, [details]);
+    const mainCast = details && details.credits && details.credits.cast ? details.credits.cast.slice().sort((a, b) => a.order - b.order).slice(0, 6) : [];
+    const supportingCast = details && details.credits && details.credits.cast ? details.credits.cast.slice().sort((a, b) => a.order - b.order).slice(6, 16) : [];
+    const director = details && details.credits && details.credits.crew ? details.credits.crew.find(c => c.job === "Director") : null;
+    return (React.createElement("div", { className: "modal-overlay", onClick: onClose },
+        React.createElement("div", { className: "modal", style: { maxWidth: 560, maxHeight: "85vh", overflowY: "auto" }, onClick: e => e.stopPropagation() },
+            React.createElement("button", { className: "modal-close-x", onClick: onClose },
+                React.createElement(IconX, { size: 15 })),
+            details === undefined && React.createElement("div", { className: "loading" }, "Loading details\u2026"),
+            details === null && React.createElement("div", { className: "loading" }, "Couldn't load details for this one."),
+            details && (React.createElement("div", null,
+                React.createElement("div", { style: { display: "flex", gap: 16, marginBottom: 16 } },
+                    details.poster_path
+                        ? React.createElement("img", { src: `${IMG_BASE}${details.poster_path}`, alt: details.title, style: { width: 90, height: 135, objectFit: "cover", borderRadius: 4, flexShrink: 0 } })
+                        : React.createElement("div", { style: { width: 90, height: 135, background: "var(--divider)", borderRadius: 4, flexShrink: 0 } }),
+                    React.createElement("div", null,
+                        React.createElement("h3", { className: "display", style: { fontSize: 22 } },
+                            details.title,
+                            certification && React.createElement("span", { className: "cert-badge" }, certification)),
+                        React.createElement("div", { className: "modal-sub", style: { marginTop: 4 } },
+                            (details.release_date || "").slice(0, 4),
+                            details.runtime ? ` · ${details.runtime} min` : "",
+                            details.vote_average ? ` · ${details.vote_average.toFixed(1)}★ TMDB` : ""),
+                        React.createElement("div", { style: { fontSize: 12, color: "var(--sage)", marginTop: 6, fontWeight: 600 } }, (details.genres || []).map(g => g.name).join(", ")),
+                        isRated && React.createElement("div", { className: "card-rating", style: { marginTop: 8 } },
+                            "\u2605 You rated: ",
+                            ratings[details.id].rating.toFixed(1)),
+                        React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 10 } },
+                            React.createElement("button", { className: "primary", style: { padding: "6px 12px", fontSize: 12 }, onClick: () => onRate(details) }, isRated ? "Update rating" : "Rate this"),
+                            React.createElement("button", { className: "ghost", style: { padding: "6px 12px", fontSize: 12 }, onClick: () => onTrailer(details) },
+                                React.createElement(IconPlay, null),
+                                "Trailer"),
+                            queue && !queue[details.id] && onAddToQueue && React.createElement("button", { className: "ghost", style: { padding: "6px 12px", fontSize: 12 }, onClick: () => onAddToQueue(details) },
+                                React.createElement(IconBookmark, null),
+                                "Save for later")))),
+                providers.length > 0 && (React.createElement("div", { style: { marginBottom: 14 } },
+                    React.createElement(PlatformBadges, { meta: { providers }, onPlatformClick: onPlatformClick }))),
+                details.overview && (React.createElement("div", { style: { fontSize: 14, lineHeight: 1.6, color: "var(--text)", marginBottom: 12 } }, details.overview)),
+                director && (React.createElement("div", { className: "cast-person", style: { marginBottom: 14 } },
+                    director.profile_path
+                        ? React.createElement("img", { className: "cast-photo", src: `${PROFILE_BASE}${director.profile_path}`, alt: director.name })
+                        : React.createElement("div", { className: "cast-photo" }),
+                    React.createElement("span", { style: { fontSize: 13, color: "var(--text-dim)" } },
+                        "Directed by ",
+                        React.createElement("span", { className: "cast-chip", style: { marginLeft: 4 }, onClick: () => onActorClick(director.id, director.name, true) }, director.name)))),
+                mainCast.length > 0 && (React.createElement("div", null,
+                    React.createElement("label", { className: "cast-section-label" }, "Main cast"),
+                    mainCast.map(actor => (React.createElement("div", { className: "cast-person", key: actor.cast_id || actor.credit_id },
+                        actor.profile_path
+                            ? React.createElement("img", { className: "cast-photo", src: `${PROFILE_BASE}${actor.profile_path}`, alt: actor.name })
+                            : React.createElement("div", { className: "cast-photo" }),
+                        React.createElement("span", { className: "cast-chip", onClick: () => onActorClick(actor.id, actor.name, false) }, actor.name),
+                        actor.character && React.createElement("span", { className: "cast-role" },
+                            "as ",
+                            actor.character)))))),
+                supportingCast.length > 0 && (React.createElement("div", null,
+                    React.createElement("label", { className: "cast-section-label" }, "Supporting cast"),
+                    supportingCast.map(actor => (React.createElement("div", { className: "cast-person", key: actor.cast_id || actor.credit_id },
+                        actor.profile_path
+                            ? React.createElement("img", { className: "cast-photo", src: `${PROFILE_BASE}${actor.profile_path}`, alt: actor.name })
+                            : React.createElement("div", { className: "cast-photo" }),
+                        React.createElement("span", { className: "cast-chip", onClick: () => onActorClick(actor.id, actor.name, false) }, actor.name),
+                        actor.character && React.createElement("span", { className: "cast-role" },
+                            "as ",
+                            actor.character)))))))))));
+}
+function DecadePicker({ selectedDecade, onChange }) {
+    return (React.createElement("div", { className: "pill-group", style: { marginBottom: 16 } },
+        React.createElement("button", { className: `pill ${!selectedDecade ? "selected" : ""}`, onClick: () => onChange(null) }, "Any decade"),
+        DECADES.map(d => (React.createElement("button", { key: d.key, className: `pill ${selectedDecade === d.key ? "selected" : ""}`, onClick: () => onChange(d.key) }, d.label)))));
+}
+function useDebouncedValue(value, delayMs) {
+    const [debounced, setDebounced] = useState(value);
+    useEffect(() => {
+        const t = setTimeout(() => setDebounced(value), delayMs);
+        return () => clearTimeout(t);
+    }, [value, delayMs]);
+    return debounced;
+}
+function AutocompleteDropdown({ query, mode, onPickMovie, onPickPerson, enabled, closeSignal }) {
+    const debouncedQuery = useDebouncedValue(query, 300);
+    const [suggestions, setSuggestions] = useState([]);
+    const [open, setOpen] = useState(false);
+    useEffect(() => {
+        setOpen(false);
+    }, [closeSignal]);
+    useEffect(() => {
+        if (!enabled) {
+            setOpen(false);
+            return;
+        }
+        if (!debouncedQuery || debouncedQuery.trim().length < 2) {
+            setSuggestions([]);
+            setOpen(false);
+            return;
+        }
+        let cancelled = false;
+        const endpoint = mode === "actor" ? "search/person" : "search/movie";
+        fetch(`${TMDB_BASE}/${endpoint}?api_key=${TMDB_KEY}&query=${encodeURIComponent(debouncedQuery)}`)
+            .then(r => r.json())
+            .then(data => {
+            if (cancelled)
+                return;
+            const list = (data.results || []).slice(0, 6);
+            setSuggestions(list);
+            setOpen(list.length > 0);
+        })
+            .catch(() => { if (!cancelled) {
+            setSuggestions([]);
+            setOpen(false);
+        } });
+        return () => { cancelled = true; };
+    }, [debouncedQuery, mode, enabled]);
+    if (!open || suggestions.length === 0)
+        return null;
+    return (React.createElement("div", { className: "autocomplete-dropdown" }, suggestions.map(item => (React.createElement("div", { key: item.id, className: "autocomplete-item", onMouseDown: (e) => { e.preventDefault(); setOpen(false); mode === "actor" ? onPickPerson(item) : onPickMovie(item); } },
+        mode === "actor"
+            ? (item.profile_path ? React.createElement("img", { src: `${PROFILE_BASE}${item.profile_path}`, alt: "" }) : React.createElement("img", { src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", alt: "" }))
+            : (item.poster_path ? React.createElement("img", { src: `${IMG_BASE.replace('w342', 'w92')}${item.poster_path}`, alt: "" }) : React.createElement("img", { src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", alt: "" })),
+        React.createElement("div", null,
+            React.createElement("div", null, mode === "actor" ? item.name : item.title),
+            mode !== "actor" && React.createElement("div", { className: "ac-sub" }, (item.release_date || "").slice(0, 4) || "—")))))));
+}
+function SearchTab({ ratings, onRate, navRequest, onConsumeNav, onPlatformClick, onActorClick, queue, onAddToQueue, onRemoveFromQueue }) {
+    const [mode, setMode] = useState("movie"); // "movie" | "actor" | "browse"
+    const [query, setQuery] = useState("");
+    const [results, setResults] = useState([]);
+    const [actorName, setActorName] = useState(null);
+    const [actorIsDirector, setActorIsDirector] = useState(false);
+    const [personDetails, setPersonDetails] = useState(null);
+    const [activeGenres, setActiveGenres] = useState([]);
+    const [selectedPlatforms, setSelectedPlatforms] = useState([]);
+    const [selectedDecade, setSelectedDecade] = useState(null);
+    const [page, setPage] = useState(1);
+    const [totalPages, setTotalPages] = useState(1);
+    const [visibleCount, setVisibleCount] = useState(20);
+    const [loading, setLoading] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [modalMovie, setModalMovie] = useState(null);
+    const [trailerMovie, setTrailerMovie] = useState(null);
+    const [detailMovieId, setDetailMovieId] = useState(null);
+    const [error, setError] = useState(null);
+    const [acEnabled, setAcEnabled] = useState(false);
+    const [closeSignal, setCloseSignal] = useState(0);
+    const [cameFrom, setCameFrom] = useState(null);
+    const genreList = Object.entries(GENRE_MAP)
+        .map(([id, name]) => ({ id: parseInt(id), name }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    const metaCache = useMovieMeta(mode === "actor" ? results.slice(0, visibleCount) : results);
+    function decadeParams(decadeKey) {
+        const d = DECADES.find(x => x.key === decadeKey);
+        return d ? `&primary_release_date.gte=${d.gte}&primary_release_date.lte=${d.lte}` : "";
+    }
+    function genreVoteFloor(decadeKey) {
+        const oldDecades = ["1930s", "1940s", "1950s", "1960s"];
+        return oldDecades.indexOf(decadeKey) !== -1 ? 50 : 800;
+    }
+    function platformVoteFloor(decadeKey) {
+        const oldDecades = ["1930s", "1940s", "1950s", "1960s"];
+        return oldDecades.indexOf(decadeKey) !== -1 ? 5 : 30;
+    }
+    async function fetchMovieSearchPage(q, pageNum) {
+        const res = await fetch(`${TMDB_BASE}/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(q)}&page=${pageNum}`);
+        const data = await res.json();
+        if (data.success === false)
+            throw new Error(data.status_message || "API error — check your TMDB key.");
+        return data;
+    }
+    async function fetchBrowsePage(genreIds, platformsArr, decadeKey, pageNum) {
+        let url = `${TMDB_BASE}/discover/movie?api_key=${TMDB_KEY}&sort_by=vote_average.desc&page=${pageNum}${decadeParams(decadeKey)}`;
+        if (genreIds.length > 0)
+            url += `&with_genres=${genreIds.join("%7C")}`;
+        if (platformsArr.length > 0) {
+            url += `&with_watch_providers=${platformsArr.map(p => p.id).join("%7C")}&watch_region=US&vote_count.gte=${platformVoteFloor(decadeKey)}`;
+        }
+        else {
+            url += `&with_original_language=en&vote_count.gte=${genreVoteFloor(decadeKey)}`;
+        }
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.success === false)
+            throw new Error(data.status_message || "API error — check your TMDB key.");
+        return data;
+    }
+    async function runActorSearchByName(name) {
+        setLoading(true);
+        setError(null);
+        setActorName(null);
+        setActorIsDirector(false);
+        setResults([]);
+        setVisibleCount(20);
+        try {
+            const personRes = await fetch(`${TMDB_BASE}/search/person?api_key=${TMDB_KEY}&query=${encodeURIComponent(name)}`);
+            const personData = await personRes.json();
+            if (personData.success === false)
+                throw new Error(personData.status_message || "API error — check your TMDB key.");
+            const person = (personData.results || [])[0];
+            if (!person) {
+                setActorName(null);
+                setResults([]);
+                setLoading(false);
+                return;
+            }
+            await loadPersonCredits(person.id, person.name, false);
+        }
+        catch (err) {
+            setError(err.message || "Couldn't reach TMDB. Check your connection.");
+            setResults([]);
+            setLoading(false);
+        }
+    }
+    async function loadPersonCredits(personId, personName, asDirector) {
+        setLoading(true);
+        setError(null);
+        setActorName(personName);
+        setActorIsDirector(asDirector);
+        setPersonDetails(null);
+        setResults([]);
+        setVisibleCount(20);
+        try {
+            const [creditsRes, personRes] = await Promise.all([
+                fetch(`${TMDB_BASE}/person/${personId}/movie_credits?api_key=${TMDB_KEY}`),
+                fetch(`${TMDB_BASE}/person/${personId}?api_key=${TMDB_KEY}`)
+            ]);
+            const creditsData = await creditsRes.json();
+            const personData = await personRes.json();
+            let list;
+            let totalCount;
+            if (asDirector) {
+                const directorCredits = (creditsData.crew || []).filter(c => c.job === "Director");
+                totalCount = directorCredits.length;
+                list = directorCredits;
+            }
+            else {
+                list = creditsData.cast || [];
+                totalCount = list.length;
+            }
+            setPersonDetails({
+                name: personData.name || personName,
+                profile_path: personData.profile_path || null,
+                biography: personData.biography || "",
+                totalCount
+            });
+            const withVotes = list.filter(m => (m.vote_count || 0) >= 20);
+            list = (withVotes.length >= 3 ? withVotes : list).slice();
+            list.sort((a, b) => weightedCreditScore(b) - weightedCreditScore(a));
+            setResults(list);
+        }
+        catch (err) {
+            setError("Couldn't reach TMDB. Check your connection.");
+            setResults([]);
+        }
+        setLoading(false);
+    }
+    async function runMovieSearch(q) {
+        setLoading(true);
+        setError(null);
+        setResults([]);
+        setPage(1);
+        try {
+            const data = await fetchMovieSearchPage(q, 1);
+            setResults(data.results || []);
+            setTotalPages(data.total_pages || 1);
+        }
+        catch (err) {
+            setError(err.message || "Couldn't reach TMDB. Check your connection.");
+            setResults([]);
+        }
+        setLoading(false);
+    }
+    async function runBrowseSearch(genreIds, platformsArr, decadeKey, pageNum) {
+        setLoading(true);
+        setError(null);
+        if (pageNum === 1)
+            setResults([]);
+        try {
+            const data = await fetchBrowsePage(genreIds, platformsArr, decadeKey, pageNum);
+            if (pageNum === 1)
+                setResults(data.results || []);
+            else
+                setResults(prev => prev.concat(data.results || []));
+            setTotalPages(data.total_pages || 1);
+            setPage(pageNum);
+        }
+        catch (err) {
+            setError(err.message || "Couldn't reach TMDB. Check your connection.");
+            if (pageNum === 1)
+                setResults([]);
+        }
+        setLoading(false);
+    }
+    useEffect(() => {
+        if (mode !== "browse")
+            return;
+        runBrowseSearch(activeGenres, selectedPlatforms, selectedDecade, 1);
+        // eslint-disable-next-line
+    }, [mode, activeGenres, selectedPlatforms, selectedDecade]);
+    function toggleGenreActive(genreId) {
+        setActiveGenres(prev => prev.includes(genreId) ? prev.filter(g => g !== genreId) : [...prev, genreId]);
+    }
+    function togglePlatformSelection(name) {
+        setSelectedPlatforms(prev => {
+            const exists = prev.find(p => p.name === name);
+            return exists ? prev.filter(p => p.name !== name) : [...prev, { id: PROVIDER_IDS[name], name }];
+        });
+    }
+    useEffect(() => {
+        if (!navRequest)
+            return;
+        setAcEnabled(false);
+        setCloseSignal(s => s + 1);
+        if (navRequest.type === "actor") {
+            if (mode !== "actor") {
+                setCameFrom({ mode, query, activeGenres, selectedPlatforms, selectedDecade, results, page, totalPages });
+            }
+            setMode("actor");
+            setQuery(navRequest.name);
+            if (navRequest.id)
+                loadPersonCredits(navRequest.id, navRequest.name, navRequest.asDirector);
+            else
+                runActorSearchByName(navRequest.name);
+        }
+        else if (navRequest.type === "platform") {
+            setCameFrom(null);
+            setMode("browse");
+            setActiveGenres(Object.keys(GENRE_MAP).map(Number));
+            setSelectedDecade(null);
+            setSelectedPlatforms([{ id: navRequest.id, name: navRequest.name }]);
+        }
+        onConsumeNav();
+        // eslint-disable-next-line
+    }, [navRequest]);
+    async function doSearch(e) {
+        e.preventDefault();
+        if (!query.trim())
+            return;
+        setAcEnabled(false);
+        setCloseSignal(s => s + 1);
+        if (mode === "actor")
+            await runActorSearchByName(query);
+        else
+            await runMovieSearch(query);
+    }
+    async function loadMore() {
+        setLoadingMore(true);
+        try {
+            if (mode === "actor") {
+                setVisibleCount(v => v + 30);
+            }
+            else if (mode === "browse") {
+                const data = await fetchBrowsePage(activeGenres, selectedPlatforms, selectedDecade, page + 1);
+                setResults(prev => prev.concat(data.results || []));
+                setPage(page + 1);
+                setTotalPages(data.total_pages || 1);
+            }
+            else {
+                const nextPage = page + 1;
+                const data = await fetchMovieSearchPage(query, nextPage);
+                setResults(prev => prev.concat(data.results || []));
+                setPage(nextPage);
+                setTotalPages(data.total_pages || 1);
+            }
+        }
+        catch (err) {
+            setError(err.message || "Couldn't load more.");
+        }
+        setLoadingMore(false);
+    }
+    function switchMode(newMode) {
+        if (newMode === "actor" && mode !== "actor") {
+            setCameFrom({ mode, query, activeGenres, selectedPlatforms, selectedDecade, results, page, totalPages });
+        }
+        else if (newMode !== "actor") {
+            setCameFrom(null);
+        }
+        setMode(newMode);
+        setResults([]);
+        setActorName(null);
+        setActorIsDirector(false);
+        setPersonDetails(null);
+        setSelectedPlatforms([]);
+        setSelectedDecade(null);
+        setActiveGenres(newMode === "browse" ? Object.keys(GENRE_MAP).map(Number) : []);
+        setError(null);
+        setPage(1);
+        setVisibleCount(20);
+        setQuery("");
+        setAcEnabled(false);
+        setCloseSignal(s => s + 1);
+    }
+    function goBack() {
+        if (cameFrom) {
+            setMode(cameFrom.mode);
+            setQuery(cameFrom.query || "");
+            setActiveGenres(cameFrom.activeGenres || []);
+            setSelectedPlatforms(cameFrom.selectedPlatforms || []);
+            setSelectedDecade(cameFrom.selectedDecade || null);
+            setResults(cameFrom.results || []);
+            setPage(cameFrom.page || 1);
+            setTotalPages(cameFrom.totalPages || 1);
+            setActorName(null);
+            setActorIsDirector(false);
+            setPersonDetails(null);
+            setCameFrom(null);
+        }
+        else {
+            switchMode("movie");
+        }
+    }
+    const displayedResults = mode === "actor" ? results.slice(0, visibleCount) : results;
+    const canLoadMore = mode === "actor" ? results.length > visibleCount : page < totalPages;
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "pill-group", style: { marginBottom: 12 } },
+            React.createElement("button", { className: `pill ${mode === "movie" ? "selected" : ""}`, onClick: () => switchMode("movie") }, "By movie title"),
+            React.createElement("button", { className: `pill ${mode === "actor" ? "selected" : ""}`, onClick: () => switchMode("actor") }, "By actor/director"),
+            React.createElement("button", { className: `pill ${mode === "browse" ? "selected" : ""}`, onClick: () => switchMode("browse") }, "Browse by category & platform")),
+        (mode === "movie" || mode === "actor") && (React.createElement("form", { className: "search-row", onSubmit: doSearch },
+            React.createElement("input", { type: "text", placeholder: mode === "actor" ? "Search an actor or director's name…" : "Search a movie title…", value: query, onChange: e => { setQuery(e.target.value); setAcEnabled(true); }, autoComplete: "off" }),
+            React.createElement("button", { type: "submit", className: "primary" }, "Search"),
+            React.createElement(AutocompleteDropdown, { query: query, mode: mode, enabled: acEnabled, closeSignal: closeSignal, onPickMovie: (item) => { setAcEnabled(false); setCloseSignal(s => s + 1); setQuery(item.title); setDetailMovieId(item.id); }, onPickPerson: (item) => { setAcEnabled(false); setCloseSignal(s => s + 1); setQuery(item.name); loadPersonCredits(item.id, item.name, false); } }))),
+        mode === "browse" && (React.createElement("div", null,
+            React.createElement("div", { className: "setup-notice", style: { marginBottom: 16 } }, "All categories are on by default, sorted by highest rated. Seeing a genre you don't care for? Just unclick it and it'll disappear from these results."),
+            React.createElement("div", { className: "pill-group", style: { marginBottom: 16 } }, genreList.map(g => (React.createElement("button", { key: g.id, className: `pill ${activeGenres.includes(g.id) ? "selected" : ""}`, onClick: () => toggleGenreActive(g.id) }, g.name)))),
+            React.createElement("div", { style: { fontSize: 12, color: "var(--text-dim)", marginBottom: 8 } }, "Filter to specific platforms (optional \u2014 tap as many as you'd like)"),
+            React.createElement("div", { className: "pill-group", style: { marginBottom: 16 } }, ALL_SERVICES.map(s => (React.createElement("button", { key: s, className: `pill ${selectedPlatforms.some(p => p.name === s) ? "selected" : ""}`, onClick: () => togglePlatformSelection(s) }, s)))),
+            React.createElement(DecadePicker, { selectedDecade: selectedDecade, onChange: setSelectedDecade }))),
+        error && React.createElement("div", { className: "setup-notice" },
+            React.createElement("strong", null, "Error:"),
+            " ",
+            error),
+        loading && React.createElement("div", { className: "loading" }, mode === "browse" ? "Finding top-rated picks…" : "Searching…"),
+        !loading && mode === "actor" && actorName && (React.createElement("div", null,
+            React.createElement("button", { className: "ghost", style: { marginBottom: 14 }, onClick: goBack },
+                React.createElement(IconArrowLeft, null),
+                "Back"),
+            personDetails && (React.createElement("div", { style: { display: "flex", gap: 16, marginBottom: 16, background: "var(--bg-raised)", border: "1px solid var(--divider)", borderRadius: 6, padding: 16 } },
+                personDetails.profile_path
+                    ? React.createElement("img", { src: `${PROFILE_BASE}${personDetails.profile_path}`, alt: personDetails.name, style: { width: 100, height: 150, objectFit: "cover", borderRadius: 4, flexShrink: 0 } })
+                    : React.createElement("div", { style: { width: 100, height: 150, background: "var(--divider)", borderRadius: 4, flexShrink: 0 } }),
+                React.createElement("div", null,
+                    React.createElement("h3", { className: "display", style: { fontSize: 20 } }, personDetails.name),
+                    React.createElement("div", { style: { fontSize: 12, color: "var(--sage)", fontWeight: 600, marginTop: 4, marginBottom: 8 } },
+                        personDetails.totalCount,
+                        " movie",
+                        personDetails.totalCount === 1 ? "" : "s",
+                        actorIsDirector ? " directed" : ""),
+                    personDetails.biography && (React.createElement("div", { style: { fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5, maxHeight: 100, overflowY: "auto" } }, personDetails.biography))))),
+            React.createElement("div", { style: { fontSize: 13, color: "var(--text-dim)", marginBottom: 12 } },
+                "Showing movies ",
+                actorIsDirector ? "directed by" : "with",
+                " ",
+                React.createElement("strong", { style: { color: "var(--text)" } }, actorName),
+                ", highest rated first"))),
+        !loading && mode === "actor" && query && actorName === null && results.length === 0 && !error && (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "No one found"),
+            React.createElement("div", null, "Try checking the spelling of the name."))),
+        !loading && displayedResults.length > 0 && (React.createElement("div", { className: "grid" }, displayedResults.map(movie => (React.createElement("div", { className: "card", key: movie.id },
+            React.createElement("div", { className: "poster-wrap", onClick: () => setDetailMovieId(movie.id) },
+                movie.poster_path
+                    ? React.createElement("img", { src: `${IMG_BASE}${movie.poster_path}`, alt: movie.title })
+                    : React.createElement("img", { src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", alt: "" }),
+                movie.vote_average > 0 && (React.createElement("span", { className: `badge-tmdb tier-${ratingTier(movie.vote_average)}` }, movie.vote_average.toFixed(1))),
+                ratings[movie.id] && (React.createElement("span", { className: "badge-user" }, ratings[movie.id].rating.toFixed(1)))),
+            React.createElement("div", { className: "card-body" },
+                React.createElement("div", { className: "card-title", style: { cursor: "pointer" }, onClick: () => setDetailMovieId(movie.id) },
+                    movie.title,
+                    React.createElement(CertBadge, { meta: metaCache[movie.id] })),
+                React.createElement("div", { className: "card-year" }, (movie.release_date || "").slice(0, 4) || "—"),
+                mode === "actor" && movie.character && React.createElement("div", { className: "card-year", style: { fontStyle: "italic" } },
+                    "as ",
+                    movie.character),
+                mode === "actor" && actorIsDirector && React.createElement("div", { className: "card-year", style: { fontStyle: "italic" } }, "Director"),
+                React.createElement(PlatformBadges, { meta: metaCache[movie.id], onPlatformClick: onPlatformClick }),
+                React.createElement("div", { style: { display: "flex", gap: 6, flexWrap: "wrap" } },
+                    !ratings[movie.id] && React.createElement("button", { className: "log-btn", onClick: () => setModalMovie(movie) }, "+ Log & rate"),
+                    React.createElement("button", { className: "log-btn", onClick: () => setTrailerMovie(movie), title: "Watch trailer" },
+                        React.createElement(IconPlay, null),
+                        "Trailer"),
+                    !queue[movie.id] && React.createElement("button", { className: "log-btn", onClick: () => onAddToQueue(movie), title: "Save for another night" },
+                        React.createElement(IconBookmark, null),
+                        "Save")))))))),
+        !loading && canLoadMore && displayedResults.length > 0 && (React.createElement("div", { className: "see-more-row" },
+            React.createElement("button", { className: "ghost", onClick: loadMore, disabled: loadingMore }, loadingMore ? "Loading…" : "See more movies"))),
+        !loading && !error && results.length === 0 && query === "" && (mode === "movie" || mode === "actor") && (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, mode === "actor" ? "Search an actor or director to see their movies" : "Search for a movie to get started"),
+            React.createElement("div", null, Object.keys(ratings).length >= 3
+                ? "Keep rating movies you've seen — the more you rate, the better DIALD gets at finding your next favorite."
+                : "Once you rate a few, head to the Tonight tab for recommendations."))),
+        !loading && mode === "browse" && activeGenres.length === 0 && (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "No categories selected"),
+            React.createElement("div", null, "Click at least one category above to see results."))),
+        detailMovieId && (React.createElement(MovieDetailModal, { movieId: detailMovieId, ratings: ratings, onClose: () => setDetailMovieId(null), onRate: (m) => { setModalMovie(m); setDetailMovieId(null); }, onTrailer: (m) => { setTrailerMovie(m); setDetailMovieId(null); }, onActorClick: (id, name, asDirector) => { setDetailMovieId(null); onActorClick(id, name, asDirector); }, onPlatformClick: (id, name) => { setDetailMovieId(null); onPlatformClick(id, name); }, queue: queue, onAddToQueue: onAddToQueue })),
+        modalMovie && (React.createElement(RatingModal, { movie: modalMovie, initial: ratings[modalMovie.id] ? ratings[modalMovie.id].rating : undefined, onSave: onRate, onClose: () => setModalMovie(null) })),
+        trailerMovie && (React.createElement(TrailerModal, { movie: trailerMovie, onClose: () => setTrailerMovie(null) }))));
+}
+function LogTab({ ratings, onRemove, onRate, onPlatformClick, onActorClick }) {
+    const [editMovie, setEditMovie] = useState(null);
+    const [trailerMovie, setTrailerMovie] = useState(null);
+    const [detailMovieId, setDetailMovieId] = useState(null);
+    const list = Object.values(ratings).sort((a, b) => b.rating - a.rating);
+    const metaCache = useMovieMeta(list);
+    if (list.length === 0) {
+        return (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Your log is empty"),
+            React.createElement("div", null, "Rate movies from the Search tab and they'll show up here.")));
+    }
+    return (React.createElement("div", null,
+        list.map(m => (React.createElement("div", { className: "log-row", key: m.id },
+            m.poster_path
+                ? React.createElement("img", { src: `${IMG_BASE}${m.poster_path}`, alt: m.title, style: { cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) })
+                : React.createElement("div", { style: { width: 46, height: 69, background: "var(--divider)", borderRadius: 3, flexShrink: 0, cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) }),
+            React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) },
+                React.createElement("div", { className: "log-row-title" },
+                    m.title,
+                    React.createElement(CertBadge, { meta: metaCache[m.id] })),
+                React.createElement("div", { className: "log-row-meta" },
+                    (m.release_date || "").slice(0, 4) || "—",
+                    m.vote_average ? ` · ${m.vote_average.toFixed(1)}★ TMDB` : "")),
+            React.createElement("button", { className: "remove-btn", onClick: () => setTrailerMovie(m), title: "Watch trailer", style: { fontSize: 14 } },
+                React.createElement(IconPlay, { size: 13 })),
+            React.createElement("div", { className: "log-row-rating", style: { cursor: "pointer" }, onClick: () => setEditMovie(m), title: "Click to change rating" }, m.rating.toFixed(1)),
+            React.createElement("button", { className: "remove-btn", onClick: () => onRemove(m.id), title: "Remove" },
+                React.createElement(IconX, { size: 13 }))))),
+        editMovie && (React.createElement(RatingModal, { movie: editMovie, initial: editMovie.rating, onSave: onRate, onClose: () => setEditMovie(null) })),
+        trailerMovie && (React.createElement(TrailerModal, { movie: trailerMovie, onClose: () => setTrailerMovie(null) })),
+        detailMovieId && (React.createElement(MovieDetailModal, { movieId: detailMovieId, ratings: ratings, onClose: () => setDetailMovieId(null), onRate: (m) => { setEditMovie({ ...m, rating: ratings[m.id] ? ratings[m.id].rating : 8.0 }); setDetailMovieId(null); }, onTrailer: (m) => { setTrailerMovie(m); setDetailMovieId(null); }, onActorClick: onActorClick, onPlatformClick: onPlatformClick }))));
+}
+function QueueTab({ queue, ratings, onRemoveFromQueue, onRate, onPlatformClick, onActorClick }) {
+    const [editMovie, setEditMovie] = useState(null);
+    const [trailerMovie, setTrailerMovie] = useState(null);
+    const [detailMovieId, setDetailMovieId] = useState(null);
+    const list = Object.values(queue).sort((a, b) => b.savedAt - a.savedAt);
+    const metaCache = useMovieMeta(list);
+    function rateAndRemove(movie, rating) {
+        onRate(movie, rating);
+        onRemoveFromQueue(movie.id);
+    }
+    if (list.length === 0) {
+        return (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Your DIALD Queue is empty"),
+            React.createElement("div", null, "Tap \"Save for another night\" on any movie to keep it here for later.")));
+    }
+    return (React.createElement("div", null,
+        list.map(m => (React.createElement("div", { className: "log-row", key: m.id },
+            m.poster_path
+                ? React.createElement("img", { src: `${IMG_BASE}${m.poster_path}`, alt: m.title, style: { cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) })
+                : React.createElement("div", { style: { width: 46, height: 69, background: "var(--divider)", borderRadius: 3, flexShrink: 0, cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) }),
+            React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) },
+                React.createElement("div", { className: "log-row-title" },
+                    m.title,
+                    React.createElement(CertBadge, { meta: metaCache[m.id] })),
+                React.createElement("div", { className: "log-row-meta" },
+                    (m.release_date || "").slice(0, 4) || "—",
+                    m.vote_average ? ` · ${m.vote_average.toFixed(1)}★ TMDB` : ""),
+                React.createElement(PlatformBadges, { meta: metaCache[m.id], onPlatformClick: onPlatformClick })),
+            React.createElement("button", { className: "remove-btn", onClick: () => setTrailerMovie(m), title: "Watch trailer", style: { fontSize: 14 } },
+                React.createElement(IconPlay, { size: 13 })),
+            React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 10px" }, onClick: () => setEditMovie(m) }, "Rate it"),
+            React.createElement("button", { className: "remove-btn", onClick: () => onRemoveFromQueue(m.id), title: "Remove from queue" },
+                React.createElement(IconX, { size: 13 }))))),
+        editMovie && (React.createElement(RatingModal, { movie: editMovie, onSave: rateAndRemove, onClose: () => setEditMovie(null) })),
+        trailerMovie && (React.createElement(TrailerModal, { movie: trailerMovie, onClose: () => setTrailerMovie(null) })),
+        detailMovieId && (React.createElement(MovieDetailModal, { movieId: detailMovieId, ratings: ratings, onClose: () => setDetailMovieId(null), onRate: (m) => { setEditMovie(m); setDetailMovieId(null); }, onTrailer: (m) => { setTrailerMovie(m); setDetailMovieId(null); }, onActorClick: onActorClick, onPlatformClick: onPlatformClick }))));
+}
+function TonightTab({ ratings, onRate, onPlatformClick, onActorClick, notForMeIds, onAddNotForMe, excludedGenres, onAddExcludedGenre, onRemoveExcludedGenre, genreDislikeCounts, queue, onAddToQueue, onRemoveFromQueue }) {
+    const [selectedMoodGenres, setSelectedMoodGenres] = useState([]);
+    const [runtime, setRuntime] = useState(null);
+    const [selectedDecade, setSelectedDecade] = useState(null);
+    const [selectedPlatforms, setSelectedPlatforms] = useState([]);
+    const [recs, setRecs] = useState(null);
+    const [heldMovies, setHeldMovies] = useState([]);
+    const [candidatePool, setCandidatePool] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [backfilling, setBackfilling] = useState(false);
+    const [seenIds, setSeenIds] = useState([]);
+    const [error, setError] = useState(null);
+    const [modalMovie, setModalMovie] = useState(null);
+    const [trailerMovie, setTrailerMovie] = useState(null);
+    const [detailMovieId, setDetailMovieId] = useState(null);
+    const ratedList = Object.values(ratings);
+    const hasEnoughData = ratedList.length >= 3;
+    const metaCache = useMovieMeta(recs || []);
+    function togglePlatform(name) {
+        setSelectedPlatforms(prev => prev.includes(name) ? prev.filter(x => x !== name) : [...prev, name]);
+    }
+    function toggleMaybe(movie) {
+        setHeldMovies(prev => {
+            const exists = prev.find(m => m.id === movie.id);
+            return exists ? prev.filter(m => m.id !== movie.id) : [...prev, movie];
+        });
+    }
+    const genreScores = useMemo(() => {
+        const scores = {};
+        ratedList.forEach(m => {
+            (m.genre_ids || []).forEach(gid => {
+                if (!scores[gid])
+                    scores[gid] = { total: 0, count: 0 };
+                scores[gid].total += m.rating;
+                scores[gid].count += 1;
+            });
+        });
+        const result = {};
+        Object.entries(scores).forEach(([gid, s]) => { result[gid] = s.total / s.count; });
+        return result;
+    }, [ratedList]);
+    const topGenreIds = useMemo(() => {
+        return Object.entries(genreScores)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([gid]) => parseInt(gid));
+    }, [genreScores]);
+    const moodGenreList = useMemo(() => {
+        return Object.entries(GENRE_MAP)
+            .map(([id, name]) => ({ id: parseInt(id), name }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+    }, []);
+    function toggleMoodGenre(genreId) {
+        setSelectedMoodGenres(prev => prev.includes(genreId) ? prev.filter(g => g !== genreId) : [...prev, genreId]);
+    }
+    const runtimes = [
+        { key: "90", label: "< 90 min", max: 90 },
+        { key: "120", label: "< 2 hrs", max: 120 },
+        { key: "any", label: "Doesn't matter", max: null }
+    ];
+    function scoreCandidate(m) {
+        const overlapGenres = (m.genre_ids || []).filter(g => genreScores[g] !== undefined);
+        const tasteBoost = overlapGenres.length
+            ? overlapGenres.reduce((sum, g) => sum + genreScores[g], 0) / overlapGenres.length
+            : m.vote_average;
+        const popScore = Math.min(10, Math.log10((m.popularity || 0) + 1) * 3);
+        const dislikePenalty = (m.genre_ids || []).reduce((sum, g) => sum + (genreDislikeCounts[g] || 0), 0) * 0.4;
+        const raw = tasteBoost * 0.5 + m.vote_average * 0.25 + popScore * 0.25;
+        return Math.max(0, Math.min(10, raw - dislikePenalty));
+    }
+    function isExcluded(m, extraExcludeIds) {
+        return !!ratings[m.id] ||
+            notForMeIds.indexOf(m.id) !== -1 ||
+            seenIds.indexOf(m.id) !== -1 ||
+            (extraExcludeIds && extraExcludeIds.indexOf(m.id) !== -1) ||
+            (m.genre_ids || []).some(g => excludedGenres.indexOf(g) !== -1);
+    }
+    async function fetchCandidatePool(genreParam, decadeObj, runtimeObj, voteFloor, minWanted) {
+        let allCandidates = [];
+        for (let p = 1; p <= 8; p++) {
+            let url = `${TMDB_BASE}/discover/movie?api_key=${TMDB_KEY}&sort_by=popularity.desc&vote_count.gte=${voteFloor}&vote_average.gte=5.5&with_original_language=en&with_genres=${genreParam}&page=${p}`;
+            if (runtimeObj && runtimeObj.max)
+                url += `&with_runtime.lte=${runtimeObj.max}`;
+            if (decadeObj)
+                url += `&primary_release_date.gte=${decadeObj.gte}&primary_release_date.lte=${decadeObj.lte}`;
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data.success === false)
+                throw new Error(data.status_message || "API error.");
+            allCandidates = allCandidates.concat(data.results || []);
+            const filteredSoFar = allCandidates.filter((m, idx, arr) => !isExcluded(m) && arr.findIndex(x => x.id === m.id) === idx);
+            if (filteredSoFar.length >= minWanted || p >= (data.total_pages || 1))
+                break;
+        }
+        return allCandidates.filter((m, idx, arr) => !isExcluded(m) && arr.findIndex(x => x.id === m.id) === idx);
+    }
+    async function buildScoredPool(minWanted) {
+        const genresToUse = selectedMoodGenres.length ? selectedMoodGenres : topGenreIds;
+        const genreParam = genresToUse.length ? genresToUse.join("%7C") : "18";
+        const runtimeObj = runtimes.find(r => r.key === runtime);
+        const decadeObj = selectedDecade ? DECADES.find(d => d.key === selectedDecade) : null;
+        const oldDecades = ["1930s", "1940s", "1950s", "1960s"];
+        const baseVoteFloor = oldDecades.indexOf(selectedDecade) !== -1 ? 20 : 300;
+        let pool = await fetchCandidatePool(genreParam, decadeObj, runtimeObj, baseVoteFloor, minWanted);
+        if (pool.length < minWanted && decadeObj) {
+            pool = await fetchCandidatePool(genreParam, null, runtimeObj, baseVoteFloor, minWanted);
+        }
+        if (pool.length < minWanted && runtimeObj && runtimeObj.max) {
+            pool = await fetchCandidatePool(genreParam, decadeObj, null, baseVoteFloor, minWanted);
+        }
+        if (pool.length < minWanted) {
+            pool = await fetchCandidatePool(genreParam, null, null, 30, minWanted);
+        }
+        if (pool.length < minWanted) {
+            pool = await fetchCandidatePool("18%7C35%7C53%7C28", null, null, 20, minWanted);
+        }
+        return pool.map(m => ({ ...m, predicted: scoreCandidate(m) })).sort((a, b) => b.predicted - a.predicted);
+    }
+    async function applyPlatformFilter(sortedPool, need) {
+        if (selectedPlatforms.length === 0)
+            return { picks: sortedPool.slice(0, need), rest: sortedPool.slice(need) };
+        const matches = [];
+        const leftovers = [];
+        const batchSize = 15;
+        for (let i = 0; i < sortedPool.length; i += batchSize) {
+            const batch = sortedPool.slice(i, i + batchSize);
+            const withMeta = await Promise.all(batch.map(async (m) => ({ ...m, _meta: await fetchMovieMeta(m.id) })));
+            withMeta.forEach(m => {
+                if (m._meta.providers.some(p => selectedPlatforms.indexOf(p.name) !== -1))
+                    matches.push(m);
+                else
+                    leftovers.push(m);
+            });
+            if (matches.length >= need + 10) {
+                leftovers.push(...sortedPool.slice(i + batchSize));
+                break;
+            }
+        }
+        if (matches.length === 0)
+            return { picks: sortedPool.slice(0, need), rest: sortedPool.slice(need) };
+        return { picks: matches.slice(0, need), rest: matches.slice(need).concat(leftovers) };
+    }
+    async function findMovies() {
+        setLoading(true);
+        setError(null);
+        setRecs(null);
+        try {
+            const slotsNeeded = Math.max(0, 5 - heldMovies.length);
+            if (slotsNeeded === 0) {
+                setRecs(heldMovies.slice(0, 5));
+                setCandidatePool([]);
+                setLoading(false);
+                return;
+            }
+            const sortedPool = await buildScoredPool(slotsNeeded + 20);
+            const { picks, rest } = await applyPlatformFilter(sortedPool, slotsNeeded);
+            const finalList = heldMovies.concat(picks).slice(0, 5);
+            setRecs(finalList);
+            setCandidatePool(rest);
+            setSeenIds(prev => prev.concat(picks.map(m => m.id)));
+        }
+        catch (err) {
+            setError(err.message || "Couldn't reach TMDB. Check your connection.");
+        }
+        setLoading(false);
+    }
+    async function backfillSlots(count) {
+        setBackfilling(true);
+        let pool = candidatePool.filter(m => !isExcluded(m));
+        const picked = [];
+        while (picked.length < count && pool.length > 0) {
+            picked.push(pool.shift());
+        }
+        if (picked.length < count) {
+            try {
+                const more = await buildScoredPool((count - picked.length) + 15);
+                const filtered = more.filter(m => !isExcluded(m, picked.map(p => p.id)));
+                while (picked.length < count && filtered.length > 0) {
+                    picked.push(filtered.shift());
+                }
+                pool = filtered;
+            }
+            catch (e) { }
+        }
+        setCandidatePool(pool);
+        if (picked.length > 0) {
+            setRecs(prev => (prev || []).concat(picked).slice(0, 5));
+            setSeenIds(prev => prev.concat(picked.map(m => m.id)));
+        }
+        setBackfilling(false);
+    }
+    function removeSuggestion(movie) {
+        setRecs(prev => (prev || []).filter(m => m.id !== movie.id));
+        setHeldMovies(prev => prev.filter(m => m.id !== movie.id));
+        onAddNotForMe(movie);
+        backfillSlots(1);
+    }
+    function excludeGenre(genreId) {
+        onAddExcludedGenre(genreId);
+        const removedFromRecs = (recs || []).filter(m => (m.genre_ids || []).indexOf(genreId) !== -1).length;
+        setRecs(prev => (prev || []).filter(m => (m.genre_ids || []).indexOf(genreId) === -1));
+        setHeldMovies(prev => prev.filter(m => (m.genre_ids || []).indexOf(genreId) === -1));
+        if (removedFromRecs > 0)
+            backfillSlots(removedFromRecs);
+    }
+    if (!hasEnoughData) {
+        return (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Rate a few more movies first"),
+            React.createElement("div", null,
+                "You've logged ",
+                ratedList.length,
+                " of 3 needed. Once you rate at least 3, DIALD can learn your taste and recommend something for tonight.")));
+    }
+    return (React.createElement("div", null,
+        excludedGenres.length > 0 && (React.createElement("div", { className: "setup-notice", style: { marginBottom: 16 } },
+            React.createElement("strong", null, "Not recommending:"),
+            " ",
+            excludedGenres.map(gid => (React.createElement("span", { key: gid, className: "platform-chip", style: { marginRight: 6 }, onClick: () => onRemoveExcludedGenre(gid) },
+                GENRE_MAP[gid] || gid,
+                " ",
+                React.createElement(IconX, { size: 10 })))))),
+        React.createElement("div", { className: "quiz-card" },
+            React.createElement("div", { className: "quiz-step" },
+                React.createElement("label", null, "Mood \u2014 pick as many genres as you'd like (leave blank to use your own taste profile)"),
+                React.createElement("div", { className: "pill-group" }, moodGenreList.map(g => (React.createElement("button", { key: g.id, className: `pill ${selectedMoodGenres.includes(g.id) ? "selected" : ""}`, onClick: () => toggleMoodGenre(g.id) }, g.name))))),
+            React.createElement("div", { className: "quiz-step" },
+                React.createElement("label", null, "How much time"),
+                React.createElement("div", { className: "pill-group" }, runtimes.map(r => (React.createElement("button", { key: r.key, className: `pill ${runtime === r.key ? "selected" : ""}`, onClick: () => setRuntime(r.key) }, r.label))))),
+            React.createElement("div", { className: "quiz-step" },
+                React.createElement("label", null, "Decade"),
+                React.createElement(DecadePicker, { selectedDecade: selectedDecade, onChange: setSelectedDecade })),
+            React.createElement("div", { className: "quiz-step" },
+                React.createElement("label", null, "Platform (optional \u2014 leave blank to see everything)"),
+                React.createElement("div", { className: "pill-group" }, ALL_SERVICES.map(s => (React.createElement("button", { key: s, className: `pill ${selectedPlatforms.includes(s) ? "selected" : ""}`, onClick: () => togglePlatform(s) }, s))))),
+            React.createElement("button", { className: "primary", style: { width: "100%" }, onClick: () => findMovies() }, "Find me 5 movies")),
+        loading && React.createElement("div", { className: "loading" }, "Cross-referencing your taste against what's out there\u2026"),
+        error && React.createElement("div", { className: "setup-notice", style: { marginTop: 20 } },
+            React.createElement("strong", null, "Error:"),
+            " ",
+            error),
+        recs && recs.length === 0 && !loading && (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Nothing matched"),
+            React.createElement("div", null, "Try a different mood, runtime, decade, or platform."))),
+        recs && recs.length > 0 && (React.createElement("div", { style: { marginTop: 24 } },
+            recs.map(m => {
+                const isHeld = heldMovies.some(h => h.id === m.id);
+                return (React.createElement("div", { className: "rec-card", key: m.id, style: isHeld ? { borderColor: "var(--accent)" } : {} },
+                    React.createElement("div", { className: "poster-wrap", style: { width: 80, flexShrink: 0 }, onClick: () => setDetailMovieId(m.id) },
+                        m.poster_path
+                            ? React.createElement("img", { src: `${IMG_BASE}${m.poster_path}`, alt: m.title, style: { width: 80, height: 120 } })
+                            : React.createElement("div", { style: { width: 80, height: 120, background: "var(--divider)", borderRadius: "var(--radius-md)" } }),
+                        m.vote_average > 0 && (React.createElement("span", { className: `badge-tmdb tier-${ratingTier(m.vote_average)}` }, m.vote_average.toFixed(1)))),
+                    React.createElement("div", { style: { flex: 1 } },
+                        React.createElement("div", { className: "rec-title", style: { cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) },
+                            m.title,
+                            React.createElement(CertBadge, { meta: m._meta || metaCache[m.id] }),
+                            isHeld && React.createElement("span", { className: "cert-badge", style: { color: "var(--accent)", borderColor: "var(--accent)" } }, "HELD")),
+                        React.createElement("div", { className: "rec-meta" },
+                            (m.release_date || "").slice(0, 4),
+                            " \u00B7",
+                            " ",
+                            (m.genre_ids || []).filter(Boolean).slice(0, 3).map(g => (React.createElement("span", { key: g, style: { marginRight: 6 } },
+                                GENRE_MAP[g],
+                                React.createElement("span", { style: { cursor: "pointer", color: "var(--danger)", marginLeft: 2 }, title: `Stop recommending ${GENRE_MAP[g]}`, onClick: () => excludeGenre(g) },
+                                    React.createElement(IconX, { size: 10 })))))),
+                        m.overview && (React.createElement("div", { style: { fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5, marginBottom: 8 } }, m.overview.length > 140 ? m.overview.slice(0, 140).trim() + "…" : m.overview)),
+                        React.createElement(PlatformBadges, { meta: m._meta || metaCache[m.id], onPlatformClick: onPlatformClick }),
+                        React.createElement("div", { className: "rec-predicted" },
+                            "Predicted for you: ",
+                            m.predicted.toFixed(1)),
+                        React.createElement("div", { className: "rec-why" }, "Matched against your top-rated genres."),
+                        React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" } },
+                            ratings[m.id]
+                                ? React.createElement("span", { className: "card-rating" }, "\u2605 Already logged")
+                                : React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => setModalMovie(m) }, "Already seen it? Rate it"),
+                            React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => setTrailerMovie(m) },
+                                React.createElement(IconPlay, null),
+                                "Trailer"),
+                            React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px", color: isHeld ? "var(--accent)" : undefined, borderColor: isHeld ? "var(--accent)" : undefined }, onClick: () => toggleMaybe(m) }, isHeld ? React.createElement(React.Fragment, null,
+                                React.createElement(IconStar, { filled: true }),
+                                "Held") : React.createElement(React.Fragment, null,
+                                React.createElement(IconHelp, null),
+                                "Maybe")),
+                            React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => removeSuggestion(m), title: "Never suggest this movie again" },
+                                React.createElement(IconBan, null),
+                                "Not for me"),
+                            !queue[m.id] && React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => onAddToQueue(m) },
+                                React.createElement(IconBookmark, null),
+                                "Save for another night")))));
+            }),
+            React.createElement("div", { className: "see-more-row" },
+                React.createElement("button", { className: "ghost", onClick: () => findMovies(), disabled: loading }, "\uD83D\uDD04 New picks"),
+                backfilling && React.createElement("div", { style: { fontSize: 12, color: "var(--text-dim)", marginTop: 8 } }, "Finding a replacement\u2026")))),
+        modalMovie && (React.createElement(RatingModal, { movie: modalMovie, onSave: onRate, onClose: () => setModalMovie(null) })),
+        trailerMovie && (React.createElement(TrailerModal, { movie: trailerMovie, onClose: () => setTrailerMovie(null) })),
+        detailMovieId && (React.createElement(MovieDetailModal, { movieId: detailMovieId, ratings: ratings, onClose: () => setDetailMovieId(null), onRate: (m) => { setModalMovie(m); setDetailMovieId(null); }, onTrailer: (m) => { setTrailerMovie(m); setDetailMovieId(null); }, onActorClick: onActorClick, onPlatformClick: onPlatformClick, queue: queue, onAddToQueue: onAddToQueue }))));
+}
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App, null));
+</script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
