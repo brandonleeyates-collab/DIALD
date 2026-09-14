@@ -380,10 +380,12 @@ Source element: <body>
     background: rgba(10,7,4,0.7);
     backdrop-filter: blur(3px);
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     z-index: 50;
-    padding: 20px;
+    padding: 40px 20px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     animation: overlayIn var(--med) var(--ease);
   }
   @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
@@ -603,14 +605,20 @@ Source element: <body>
   .music-section-actions { display: flex; gap: 6px; align-items: center; }
   .fav-heart-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
   .fav-heart-btn:hover { color: var(--accent); }
-  .fav-heart-btn.favorited { color: var(--accent); }
+  .fav-heart-btn.favorited { color: var(--gold); }
   .exclude-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
   .exclude-btn:hover { color: var(--danger); }
   .exclude-btn.excluded { color: var(--danger); }
   .card-icon-row { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; }
   .card-icon-btn { background: rgba(20,16,10,0.55); border: none; border-radius: 50%; width: 26px; height: 26px; color: #fff; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-  .card-icon-btn.favorited { color: var(--accent); }
+  .card-icon-btn.favorited { color: var(--gold); }
   .card-icon-btn.excluded { color: var(--danger); }
+  .card-icon-btn.digging { color: var(--gold); }
+  .dig-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
+  .dig-btn:hover { color: var(--gold); }
+  .dig-btn.digging { color: var(--gold); }
+  .share-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; padding: 4px 6px; display: inline-flex; align-items: center; }
+  .share-btn:hover { color: var(--sage); }
   .poster-wrap { position: relative; }
 
   /* --- Music mode: genre browse --- */
@@ -657,19 +665,44 @@ async function bandDumpCallFn(name, params) {
     return data;
 }
 const spotifySearchArtists = (q, limit = 10) => bandDumpCallFn("spotify-proxy", { action: "search", type: "artist", q, limit });
-const spotifySearchTracks = (q, limit = 10) => bandDumpCallFn("spotify-proxy", { action: "search", type: "track", q, limit });
+const spotifySearchTracks = (q, limit = 10, offset = 0) => bandDumpCallFn("spotify-proxy", { action: "search", type: "track", q, limit, offset });
 const lastfmSimilarArtists = (artist, limit = 10) => bandDumpCallFn("lastfm-proxy", { action: "similar-artists", artist, limit });
 const lastfmArtistInfo = (artist) => bandDumpCallFn("lastfm-proxy", { action: "artist-info", artist });
 const lastfmTopArtistsByTag = (tag, page = 1, limit = 25) => bandDumpCallFn("lastfm-proxy", { action: "top-artists-by-tag", tag, page, limit });
+const lastfmSimilarTracks = (artist, track, limit = 10) => bandDumpCallFn("lastfm-proxy", { action: "similar-tracks", artist, track, limit });
 
 // Spotify's own top-tracks endpoint (GET /v1/artists/{id}/top-tracks) is closed to
 // apps created after Nov 2024 (this one) — confirmed via a live 403. `search`
-// filtered by `artist:"Name"` is the documented, universal fallback, and it's what
-// the "Top Songs" list below actually uses.
-const spotifyTopSongsFallback = async (artistName, limit = 10) => {
-    const data = await spotifySearchTracks(`artist:"${artistName}"`, limit);
-    const tracks = (data.tracks && data.tracks.items) || [];
-    return [...tracks].sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+// filtered by `artist:"Name"` is the documented fallback, but a single 10-result
+// relevance search never reliably contains an artist's actual biggest hits, and
+// can also pull in tracks by a different, similarly-named artist. Page through
+// several batches of results instead, keep only tracks that actually credit this
+// exact Spotify artist ID (falling back to a name match if no ID is known), fold
+// duplicate titles down to their most-popular version (the same song often shows
+// up multiple times across albums/remasters/compilations), then sort by
+// popularity and take the top `limit`.
+const spotifyTopSongsFallback = async (artistName, artistId, limit = 10) => {
+    const PAGE_SIZE = 50;
+    const pageOffsets = [0, 1, 2].map(i => i * PAGE_SIZE);
+    const pages = await Promise.all(
+        pageOffsets.map(offset => spotifySearchTracks(`artist:"${artistName}"`, PAGE_SIZE, offset).catch(() => null))
+    );
+    const targetName = (artistName || "").trim().toLowerCase();
+    const byTitle = new Map();
+    pages.forEach(data => {
+        const tracks = (data && data.tracks && data.tracks.items) || [];
+        tracks.forEach(t => {
+            const credited = t.artists || [];
+            const isThisArtist = artistId
+                ? credited.some(a => a.id === artistId)
+                : credited.some(a => a.name && a.name.trim().toLowerCase() === targetName);
+            if (!isThisArtist) return;
+            const key = (t.name || "").trim().toLowerCase();
+            const existing = byTitle.get(key);
+            if (!existing || (t.popularity || 0) > (existing.popularity || 0)) byTitle.set(key, t);
+        });
+    });
+    return [...byTitle.values()].sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, limit);
 };
 
 // Curated tag list for genre browsing — Last.fm's own tag list is user-generated
@@ -683,6 +716,22 @@ const MUSIC_GENRES = [
 
 function stripHtml(s) {
     return (s || "").replace(/<[^>]*>/g, "").trim();
+}
+
+// Resolving a Last.fm artist NAME to a Spotify artist by just taking Spotify
+// search's #1 hit is how "Alabama" (the band) ends up showing Alabama Shakes'
+// photo — Spotify ranks by popularity, not exact-name match, so a shorter or
+// less-famous name loses to a longer name that merely contains it. Pull a
+// handful of candidates and prefer one whose name matches exactly
+// (case/whitespace-insensitive) before falling back to the top search hit.
+async function resolveArtistByName(name) {
+    if (!name) return null;
+    const data = await spotifySearchArtists(name, 5);
+    const items = (data.artists && data.artists.items) || [];
+    if (items.length === 0) return null;
+    const target = name.trim().toLowerCase();
+    const exact = items.find(a => a.name && a.name.trim().toLowerCase() === target);
+    return exact || items[0];
 }
 
 function lastfmImage(images) {
@@ -724,27 +773,66 @@ async function excludeArtist(spotifyArtist, userId) {
     return row;
 }
 
+// "Digging" is independent of rated/queued/excluded status — you can be
+// actively into an artist you've already rated, or one you haven't gotten to
+// yet. Lives in its own table so it doesn't collide with user_artist_ratings.status.
+async function toggleDigArtist(spotifyArtist, userId, currentlyDigging) {
+    const row = await ensureArtistRow(spotifyArtist);
+    if (currentlyDigging) {
+        const { error } = await bandDumpDb.from("digging_artists").delete().eq("user_id", userId).eq("artist_id", row.id);
+        if (error) throw error;
+    } else {
+        const { error } = await bandDumpDb.from("digging_artists").insert({ user_id: userId, artist_id: row.id });
+        if (error && error.code !== "23505") throw error;
+    }
+    return row;
+}
+
 async function ensureArtistRow(spotifyArtist) {
     const { data: existing } = await bandDumpDb.from("artists").select("*").eq("spotify_id", spotifyArtist.id).maybeSingle();
-    if (existing) return existing;
     const img = (spotifyArtist.images && spotifyArtist.images[0] && spotifyArtist.images[0].url) || null;
+    const spotifyUrl = (spotifyArtist.external_urls && spotifyArtist.external_urls.spotify) || null;
+    if (existing) return existing;
+    // A row may already exist for this same artist under a different (wrong)
+    // spotify_id — e.g. one saved back before resolveArtistByName started
+    // preferring an exact name match over Spotify's most-popular/relevant result.
+    // If we now have a verified-correct match for that name, correct that row's
+    // spotify_id/photo/link in place instead of inserting a duplicate — this keeps
+    // the user's existing ratings/queue/digging/favorites (which point at that
+    // row's id) intact while fixing whatever wrong photo got cached.
+    const { data: byName } = await bandDumpDb.from("artists").select("*").eq("name", spotifyArtist.name).maybeSingle();
+    if (byName) {
+        if (byName.spotify_id !== spotifyArtist.id) {
+            const { data: fixed, error: fixErr } = await bandDumpDb.from("artists").update({
+                spotify_id: spotifyArtist.id,
+                image_url: img,
+                spotify_url: spotifyUrl,
+            }).eq("id", byName.id).select().single();
+            if (!fixErr && fixed) return fixed;
+        }
+        return byName;
+    }
     const { data: inserted, error } = await bandDumpDb.from("artists").insert({
         spotify_id: spotifyArtist.id,
         name: spotifyArtist.name,
         image_url: img,
-        spotify_url: (spotifyArtist.external_urls && spotifyArtist.external_urls.spotify) || null,
+        spotify_url: spotifyUrl,
     }).select().single();
     if (error) throw error;
     let genres = spotifyArtist.genres || [];
     // Spotify's Dev Mode tier strips the `genres` field from artist objects entirely
     // (confirmed live — search and single-artist lookups both come back without it),
     // so fall back to Last.fm's community tags to get a first pass of genres attached.
-    // Still editable per-artist afterward from the artist page.
+    // Still editable per-artist afterward from the artist page. Last.fm's tags are
+    // user-submitted and occasionally include an artist's own name as a "tag" (seen
+    // live on several legacy country artists) — drop anything that's just the
+    // artist's own name so it can't show up masquerading as a genre.
     if (!genres.length) {
         try {
             const info = await lastfmArtistInfo(spotifyArtist.name);
             const tags = (info.artist && info.artist.tags && info.artist.tags.tag) || [];
-            genres = tags.slice(0, 4).map(t => t.name.toLowerCase());
+            const ownName = spotifyArtist.name.trim().toLowerCase();
+            genres = tags.map(t => t.name.toLowerCase()).filter(g => g !== ownName).slice(0, 4);
         } catch (e) { /* no genre data available anywhere — fine, can still be tagged manually */ }
     }
     if (genres.length) {
@@ -919,6 +1007,15 @@ function IconBookmark({ size = 13, filled = false }) {
     return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: "2", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-2px", marginRight: 5 } },
         React.createElement("path", { d: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" }));
 }
+// Outline until favorited, solid once it is — using an emoji here (⚡) doesn't
+// work for this because emoji render in full native color regardless of CSS
+// `color`, so an "unfavorited" and "favorited" button looked identical and you
+// couldn't tell a click had registered. An SVG with fill:none vs fill:currentColor
+// actually changes appearance with state.
+function IconBolt({ size = 15, filled = false }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: filled ? "0" : "1.8", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-3px" } },
+        React.createElement("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }));
+}
 function IconBan({ size = 13 }) {
     return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", style: { display: "inline-block", verticalAlign: "-2px", marginRight: 5 } },
         React.createElement("circle", { cx: "12", cy: "12", r: "9" }),
@@ -942,6 +1039,40 @@ function IconArrowUp({ size = 20 }) {
 function IconStar({ size = 13, filled = true }) {
     return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: "1.5", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-2px", marginRight: 5 } },
         React.createElement("polygon", { points: "12 2.5 15.1 8.8 22 9.8 17 14.6 18.2 21.5 12 18.2 5.8 21.5 7 14.6 2 9.8 8.9 8.8" }));
+}
+function IconShare({ size = 14 }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-2px" } },
+        React.createElement("path", { d: "M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" }),
+        React.createElement("polyline", { points: "16 6 12 2 8 6" }),
+        React.createElement("line", { x1: "12", y1: "2", x2: "12", y2: "15" }));
+}
+// Web Share API where it exists (mobile Safari/Chrome); clipboard-copy fallback
+// everywhere else (most desktop browsers don't implement navigator.share).
+async function shareItem({ title, text, url }, onDone) {
+    try {
+        if (navigator.share) {
+            await navigator.share({ title, text, url });
+            return;
+        }
+    } catch (e) {
+        if (e && e.name === "AbortError") return; // user cancelled the share sheet
+    }
+    try {
+        await navigator.clipboard.writeText(url || text || title);
+        if (onDone) onDone("Link copied");
+    } catch (e) {
+        if (onDone) onDone("Couldn't share");
+    }
+}
+function ShareButton({ title, text, url }) {
+    const [msg, setMsg] = useState("");
+    return React.createElement("span", { style: { position: "relative", display: "inline-flex", alignItems: "center" } },
+        React.createElement("button", {
+            className: "share-btn",
+            title: "Share",
+            onClick: e => { e.stopPropagation(); shareItem({ title, text, url }, m => { setMsg(m); setTimeout(() => setMsg(""), 1500); }); },
+        }, React.createElement(IconShare, { size: 14 })),
+        msg && React.createElement("span", { style: { position: "absolute", top: "100%", right: 0, fontSize: 10.5, color: "var(--sage)", whiteSpace: "nowrap", background: "var(--bg-raised-2)", padding: "2px 6px", borderRadius: 4, marginTop: 2 } }, msg));
 }
 function ScrollToTop() {
     const [show, setShow] = useState(false);
@@ -1005,6 +1136,8 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
     const [songSearching, setSongSearching] = useState(false);
     const [favSongs, setFavSongs] = useState([]);
     const [queuedSongIds, setQueuedSongIds] = useState([]);
+    const [diggingSongIds, setDiggingSongIds] = useState([]);
+    const [isDigging, setIsDigging] = useState(false);
     const [topSongs, setTopSongs] = useState([]);
     const [topSongsLoading, setTopSongsLoading] = useState(true);
     const [bio, setBio] = useState("");
@@ -1017,6 +1150,10 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
     async function refreshQueuedSongs(artistId) {
         const { data } = await bandDumpDb.from("queued_songs").select("spotify_track_id").eq("artist_id", artistId).eq("user_id", session.user.id);
         setQueuedSongIds((data || []).map(s => s.spotify_track_id));
+    }
+    async function refreshDiggingSongs(artistId) {
+        const { data } = await bandDumpDb.from("digging_songs").select("spotify_track_id").eq("artist_id", artistId).eq("user_id", session.user.id);
+        setDiggingSongIds((data || []).map(s => s.spotify_track_id));
     }
 
     useEffect(() => {
@@ -1036,6 +1173,9 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                 }
                 await refreshFavSongs(row.id);
                 await refreshQueuedSongs(row.id);
+                await refreshDiggingSongs(row.id);
+                const { data: diggingRow } = await bandDumpDb.from("digging_artists").select("id").eq("artist_id", row.id).eq("user_id", session.user.id).maybeSingle();
+                if (!cancelled) setIsDigging(!!diggingRow);
             } catch (e) {
                 if (!cancelled) setError(e.message || "Couldn't load this artist.");
             } finally {
@@ -1054,7 +1194,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
         setBio("");
         (async () => {
             const [songsResult, infoResult] = await Promise.allSettled([
-                spotifyTopSongsFallback(spotifyArtist.name, 10),
+                spotifyTopSongsFallback(spotifyArtist.name, spotifyArtist.id, 10),
                 lastfmArtistInfo(spotifyArtist.name),
             ]);
             if (cancelled) return;
@@ -1071,6 +1211,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
     async function addGenre() {
         const g = newGenre.trim().toLowerCase();
         if (!g || !artistRow) return;
+        if (g === artistRow.name.trim().toLowerCase()) { setNewGenre(""); return; } // an artist's own name isn't a genre
         await bandDumpDb.from("artist_genres").insert({ artist_id: artistRow.id, genre: g });
         setArtistRow(prev => ({ ...prev, genres: prev.genres.includes(g) ? prev.genres : [...prev.genres, g] }));
         setNewGenre("");
@@ -1115,6 +1256,15 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
             setError(e.message);
         }
     }
+    async function digNow() {
+        try {
+            await toggleDigArtist(spotifyArtist, session.user.id, isDigging);
+            setIsDigging(!isDigging);
+            onChanged();
+        } catch (e) {
+            setError(e.message);
+        }
+    }
     async function searchSongs() {
         setSongSearching(true);
         try {
@@ -1144,6 +1294,15 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
         if (err && err.code !== "23505") return setError(err.message);
         await refreshQueuedSongs(artistRow.id);
     }
+    async function toggleSongDigging(track) {
+        if (diggingSongIds.includes(track.id)) {
+            await bandDumpDb.from("digging_songs").delete().eq("user_id", session.user.id).eq("spotify_track_id", track.id);
+        } else {
+            const { error: err } = await bandDumpDb.from("digging_songs").insert({ user_id: session.user.id, artist_id: artistRow.id, spotify_track_id: track.id, track_name: track.name, album_art_url: albumArtOf(track) });
+            if (err && err.code !== "23505") return setError(err.message);
+        }
+        await refreshDiggingSongs(artistRow.id);
+    }
 
     return (React.createElement("div", { className: "modal-overlay", onClick: onClose },
         React.createElement("div", { className: "modal", onClick: e => e.stopPropagation() },
@@ -1156,8 +1315,10 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                     React.createElement("div", null,
                         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
                             React.createElement("h3", null, artistRow.name),
-                            React.createElement("button", { className: `fav-heart-btn ${status === "rated" ? "favorited" : ""}`, onClick: favoriteNow, title: "Add to favorite artists" }, "⚡"),
-                            React.createElement("button", { className: `exclude-btn ${status === "excluded" ? "excluded" : ""}`, onClick: excludeNow, title: "Don't recommend this artist to me" }, "☠")),
+                            React.createElement("button", { className: `fav-heart-btn ${status === "rated" ? "favorited" : ""}`, onClick: favoriteNow, title: "Add to favorite artists" }, React.createElement(IconBolt, { size: 16, filled: status === "rated" })),
+                            React.createElement("button", { className: `dig-btn ${isDigging ? "digging" : ""}`, onClick: digNow, title: isDigging ? "Remove from Digging" : "I'm digging this right now" }, "🔥"),
+                            React.createElement("button", { className: `exclude-btn ${status === "excluded" ? "excluded" : ""}`, onClick: excludeNow, title: "Don't recommend this artist to me" }, "☠"),
+                            React.createElement(ShareButton, { title: artistRow.name, text: `Check out ${artistRow.name}`, url: artistRow.spotify_url || "" })),
                         React.createElement("div", { className: "genre-tag-row" },
                             artistRow.genres.map(g => (React.createElement("span", { className: "genre-tag removable", key: g },
                                 g,
@@ -1190,6 +1351,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                                     React.createElement("div", { className: "music-section-actions" },
                                         React.createElement(SongPreviewToggle, { trackId: t.id, expanded: expandedTrackId === t.id, onToggle: () => setExpandedTrackId(expandedTrackId === t.id ? null : t.id) }),
                                         React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, onClick: () => addFavSong(t) }, "+ Like"),
+                                        React.createElement("button", { className: `ghost ${diggingSongIds.includes(t.id) ? "digging" : ""}`, style: { padding: "5px 10px", fontSize: 11.5, color: diggingSongIds.includes(t.id) ? "var(--gold)" : undefined }, onClick: () => toggleSongDigging(t) }, diggingSongIds.includes(t.id) ? "🔥 Digging" : "🔥 Dig"),
                                         React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, disabled: queuedSongIds.includes(t.id), onClick: () => addSongToQueue(t) }, queuedSongIds.includes(t.id) ? "Queued" : "+ Queue"))),
                                 expandedTrackId === t.id && React.createElement(SongPreviewFrame, { trackId: t.id })))))),
 
@@ -1205,6 +1367,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                                 React.createElement("div", { className: "log-row-title" }, t.name),
                                 React.createElement("div", { className: "log-row-meta" }, (t.album && t.album.name) || "")),
                             React.createElement(SongPreviewToggle, { trackId: t.id, expanded: expandedTrackId === t.id, onToggle: () => setExpandedTrackId(expandedTrackId === t.id ? null : t.id) }),
+                            React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: diggingSongIds.includes(t.id) ? "var(--gold)" : undefined }, onClick: () => toggleSongDigging(t) }, diggingSongIds.includes(t.id) ? "🔥 Digging" : "🔥 Dig"),
                             React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, onClick: () => addFavSong(t) }, "+ Add")),
                         expandedTrackId === t.id && React.createElement(SongPreviewFrame, { trackId: t.id }))))),
                 React.createElement("div", { style: { marginTop: 10 } },
@@ -1216,7 +1379,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                             React.createElement("button", { className: "remove-btn", onClick: () => removeFavSong(s.id) }, React.createElement(IconX, { size: 13 })))))))))));
 }
 
-function MusicArtistCard({ name, imageUrl, subtitle, onOpen, onFavorite, favorited, onExclude, excluded }) {
+function MusicArtistCard({ name, imageUrl, subtitle, onOpen, onFavorite, favorited, onExclude, excluded, onDig, digging }) {
     return (React.createElement("div", { className: "card", onClick: onOpen },
         React.createElement("div", { className: "poster-wrap" },
             imageUrl ? React.createElement("img", { src: imageUrl, alt: name }) : React.createElement("div", { style: { width: "100%", aspectRatio: "1", background: "var(--bg-raised-2)" } }),
@@ -1226,11 +1389,16 @@ function MusicArtistCard({ name, imageUrl, subtitle, onOpen, onFavorite, favorit
                     onClick: e => { e.stopPropagation(); onExclude(); },
                     title: "Don't recommend this artist to me",
                 }, "☠"),
+                onDig && React.createElement("button", {
+                    className: `card-icon-btn ${digging ? "digging" : ""}`,
+                    onClick: e => { e.stopPropagation(); onDig(); },
+                    title: digging ? "Remove from Digging" : "I'm digging this right now",
+                }, "🔥"),
                 onFavorite && React.createElement("button", {
                     className: `card-icon-btn ${favorited ? "favorited" : ""}`,
                     onClick: e => { e.stopPropagation(); onFavorite(); },
                     title: "Add to favorite artists",
-                }, "⚡"))),
+                }, React.createElement(IconBolt, { size: 14, filled: favorited })))),
         React.createElement("div", { className: "card-body" },
             React.createElement("div", { className: "card-title" }, name),
             React.createElement("div", { className: "card-year" }, subtitle || "—"))));
@@ -1299,12 +1467,14 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
     const [closeSignal, setCloseSignal] = useState(0);
     const [favoritedIds, setFavoritedIds] = useState([]);
     const [excludedIds, setExcludedIds] = useState([]);
+    const [diggingIds, setDiggingIds] = useState([]);
 
     const [songSearchQuery, setSongSearchQuery] = useState("");
     const [songSearchResults, setSongSearchResults] = useState([]);
     const [songSearchLoading, setSongSearchLoading] = useState(false);
     const [songSearchError, setSongSearchError] = useState("");
     const [queuedTrackIds, setQueuedTrackIds] = useState([]);
+    const [diggingTrackIds, setDiggingTrackIds] = useState([]);
     const [expandedTrackId, setExpandedTrackId] = useState(null);
 
     const [selectedGenre, setSelectedGenre] = useState(null);
@@ -1349,6 +1519,14 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
             onChanged && onChanged();
         } catch (e2) { setError(e2.message); }
     }
+    async function digArtistFromCard(a) {
+        try {
+            const currentlyDigging = diggingIds.includes(a.id);
+            await toggleDigArtist(a, session.user.id, currentlyDigging);
+            setDiggingIds(prev => currentlyDigging ? prev.filter(id => id !== a.id) : [...prev, a.id]);
+            onChanged && onChanged();
+        } catch (e2) { setError(e2.message); }
+    }
 
     // Song search — for when you remember the song but not the band.
     async function doSongSearch(e) {
@@ -1368,8 +1546,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
     async function resolveTrackArtist(track) {
         const artistName = track.artists && track.artists[0] && track.artists[0].name;
         if (!artistName) return null;
-        const data = await spotifySearchArtists(artistName, 1);
-        return (data.artists && data.artists.items && data.artists.items[0]) || null;
+        return await resolveArtistByName(artistName);
     }
     async function openTrackArtist(track) {
         setSongSearchError("");
@@ -1389,6 +1566,19 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
             const { error: err } = await bandDumpDb.from("queued_songs").insert({ user_id: session.user.id, artist_id: row.id, spotify_track_id: track.id, track_name: track.name, album_art_url: art });
             if (err && err.code !== "23505") { setSongSearchError(err.message); return; }
             setQueuedTrackIds(prev => [...prev, track.id]);
+            onChanged && onChanged();
+        } catch (e2) { setSongSearchError(e2.message); }
+    }
+    async function digTrackFromSearch(track) {
+        setSongSearchError("");
+        try {
+            const sa = await resolveTrackArtist(track);
+            if (!sa) { setSongSearchError(`Couldn't find that artist on Spotify.`); return; }
+            const row = await ensureArtistRow(sa);
+            const art = (track.album && track.album.images && track.album.images[0] && track.album.images[0].url) || null;
+            const { error: err } = await bandDumpDb.from("digging_songs").insert({ user_id: session.user.id, artist_id: row.id, spotify_track_id: track.id, track_name: track.name, album_art_url: art });
+            if (err && err.code !== "23505") { setSongSearchError(err.message); return; }
+            setDiggingTrackIds(prev => [...prev, track.id]);
             onChanged && onChanged();
         } catch (e2) { setSongSearchError(e2.message); }
     }
@@ -1412,8 +1602,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                 // Spotify instead of trusting Last.fm's picture.
                 const resolved = await Promise.all(list.map(async a => {
                     try {
-                        const sr = await spotifySearchArtists(a.name, 1);
-                        const spotifyArtist = (sr.artists && sr.artists.items && sr.artists.items[0]) || null;
+                        const spotifyArtist = await resolveArtistByName(a.name);
                         return { name: a.name, listeners: a.listeners, spotifyArtist };
                     } catch (e) {
                         return { name: a.name, listeners: a.listeners, spotifyArtist: null };
@@ -1458,6 +1647,17 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
             onChanged && onChanged();
         } catch (e2) { setGenreError(e2.message); }
     }
+    async function digGenreArtist(entry) {
+        setGenreError("");
+        if (!entry.spotifyArtist) { setGenreError(`Couldn't find "${entry.name}" on Spotify.`); return; }
+        try {
+            const currentlyDigging = diggingIds.includes(entry.spotifyArtist.id);
+            const row = await toggleDigArtist(entry.spotifyArtist, session.user.id, currentlyDigging);
+            await attachGenreTag(row.id, selectedGenre);
+            setDiggingIds(prev => currentlyDigging ? prev.filter(id => id !== entry.spotifyArtist.id) : [...prev, entry.spotifyArtist.id]);
+            onChanged && onChanged();
+        } catch (e2) { setGenreError(e2.message); }
+    }
 
     return (React.createElement("div", null,
         React.createElement("div", { className: "pill-group", style: { margin: "14px 0" } },
@@ -1483,6 +1683,8 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                     favorited: favoritedIds.includes(a.id),
                     onExclude: session ? () => excludeArtistFromCard(a) : null,
                     excluded: excludedIds.includes(a.id),
+                    onDig: session ? () => digArtistFromCard(a) : null,
+                    digging: diggingIds.includes(a.id),
                 });
             })))),
 
@@ -1505,6 +1707,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                                 React.createElement("div", { className: "log-row-title" }, t.name),
                                 React.createElement("div", { className: "log-row-meta" }, `${artistNames}${t.album && t.album.name ? " · " + t.album.name : ""}`)),
                             React.createElement(SongPreviewToggle, { trackId: t.id, expanded: expandedTrackId === t.id, onToggle: () => setExpandedTrackId(prev => prev === t.id ? null : t.id) }),
+                            React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: diggingTrackIds.includes(t.id) ? "var(--gold)" : undefined }, disabled: diggingTrackIds.includes(t.id), onClick: () => digTrackFromSearch(t) }, diggingTrackIds.includes(t.id) ? "🔥 Digging" : "🔥 Dig"),
                             React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, disabled: queuedTrackIds.includes(t.id), onClick: () => queueTrackFromSearch(t) }, queuedTrackIds.includes(t.id) ? "Queued" : "+ Queue")),
                         expandedTrackId === t.id && React.createElement(SongPreviewFrame, { trackId: t.id }));
                 }))),
@@ -1528,6 +1731,8 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                                 favorited: favId ? favoritedIds.includes(favId) : false,
                                 onExclude: session ? () => excludeGenreArtist(entry) : null,
                                 excluded: favId ? excludedIds.includes(favId) : false,
+                                onDig: session ? () => digGenreArtist(entry) : null,
+                                digging: favId ? diggingIds.includes(favId) : false,
                             });
                         })),
                     genreResults.length > 0 && React.createElement("div", { className: "pagination-row" },
@@ -1569,6 +1774,7 @@ function useMusicLibrary(session, refreshToken, statusFilter) {
 function MusicMyArtistsTab({ session, onOpenArtist, refreshToken }) {
     const { rows, loading } = useMusicLibrary(session, refreshToken, "rated");
     const [genreFilter, setGenreFilter] = useState("");
+    const [genresOpen, setGenresOpen] = useState(false);
     const allGenres = useMemo(() => {
         const s = new Set();
         rows.forEach(r => (r.artists.genres || []).forEach(g => s.add(g)));
@@ -1577,9 +1783,11 @@ function MusicMyArtistsTab({ session, onOpenArtist, refreshToken }) {
     const filtered = genreFilter ? rows.filter(r => (r.artists.genres || []).includes(genreFilter)) : rows;
     if (loading) return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…"));
     return (React.createElement("div", null,
-        allGenres.length > 0 && (React.createElement("div", { className: "pill-group", style: { margin: "14px 0" } },
-            React.createElement("button", { className: `pill ${!genreFilter ? "selected" : ""}`, onClick: () => setGenreFilter("") }, "All"),
-            allGenres.map(g => React.createElement("button", { className: `pill ${genreFilter === g ? "selected" : ""}`, key: g, onClick: () => setGenreFilter(g) }, g)))),
+        allGenres.length > 0 && React.createElement("div", { style: { margin: "14px 0" } },
+            React.createElement("button", { className: "pill", onClick: () => setGenresOpen(o => !o) }, genreFilter ? `Genre: ${genreFilter} ▾` : "Genre ▾"),
+            genresOpen && React.createElement("div", { className: "pill-group", style: { marginTop: 8 } },
+                React.createElement("button", { className: `pill ${!genreFilter ? "selected" : ""}`, onClick: () => { setGenreFilter(""); setGenresOpen(false); } }, "All"),
+                allGenres.map(g => React.createElement("button", { className: `pill ${genreFilter === g ? "selected" : ""}`, key: g, onClick: () => { setGenreFilter(g); setGenresOpen(false); } }, g)))),
         filtered.length === 0 ? (React.createElement("div", { className: "empty" },
             React.createElement("div", { className: "display" }, "No rated artists yet"),
             React.createElement("div", null, "Rate artists from the Discover tab and they'll show up here."))) : (
@@ -1638,67 +1846,333 @@ function MusicQueueTab({ session, onOpenArtist, refreshToken }) {
                 expandedTrackId === s.id && React.createElement(SongPreviewFrame, { trackId: s.spotify_track_id }))))));
 }
 
-function MusicSpinTab({ session, onOpenArtist, onChanged }) {
-    const { rows: ratedRows } = useMusicLibrary(session, 0, "rated");
-    const { rows: queuedRows } = useMusicLibrary(session, 0, "queued");
-    const [mode, setMode] = useState("overall");
-    const [genre, setGenre] = useState("");
+function useFavoriteSongs(session, refreshToken) {
+    const [songs, setSongs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    useEffect(() => {
+        if (!session) return;
+        let cancelled = false;
+        setLoading(true);
+        (async () => {
+            const { data, error } = await bandDumpDb
+                .from("favorite_songs")
+                .select("id, spotify_track_id, track_name, album_art_url, added_at, artist_id, artists:artist_id (id, spotify_id, name, image_url, spotify_url)")
+                .eq("user_id", session.user.id)
+                .order("added_at", { ascending: false });
+            if (cancelled) return;
+            setSongs(error ? [] : (data || []));
+            setLoading(false);
+        })();
+        return () => { cancelled = true; };
+    }, [session, refreshToken]);
+    return { songs, loading };
+}
+
+// "My Songs" — every song you've liked (+ Like on an artist page, or Add to My
+// Songs from the Randomnator), across every artist, in one list.
+function MusicMySongsTab({ session, onOpenArtist, refreshToken }) {
+    const [localRefresh, setLocalRefresh] = useState(0);
+    const { songs, loading } = useFavoriteSongs(session, refreshToken + localRefresh);
+    const [expandedTrackId, setExpandedTrackId] = useState(null);
+
+    async function removeSong(id) {
+        await bandDumpDb.from("favorite_songs").delete().eq("id", id);
+        setLocalRefresh(t => t + 1);
+    }
+
+    if (loading) return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…"));
+    return (React.createElement("div", null,
+        songs.length === 0
+            ? React.createElement("div", { className: "empty" },
+                React.createElement("div", { className: "display" }, "No songs liked yet"),
+                React.createElement("div", null, "Hit + Like on a song from an artist's page, or add one from Randomnator."))
+            : songs.map(s => (React.createElement(React.Fragment, { key: s.id },
+                React.createElement("div", { className: "log-row" },
+                    s.album_art_url ? React.createElement("img", { src: s.album_art_url, alt: "", style: { width: 40, height: 40 } }) : React.createElement("div", { style: { width: 40, height: 40, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                    React.createElement("div", { style: { flex: 1, cursor: s.artists ? "pointer" : "default" }, onClick: () => s.artists && onOpenArtist(shimArtistFromRow(s.artists)) },
+                        React.createElement("div", { className: "log-row-title" }, s.track_name),
+                        React.createElement("div", { className: "log-row-meta" }, s.artists ? s.artists.name : "")),
+                    React.createElement(SongPreviewToggle, { trackId: s.spotify_track_id, expanded: expandedTrackId === s.id, onToggle: () => setExpandedTrackId(expandedTrackId === s.id ? null : s.id) }),
+                    React.createElement(ShareButton, { title: s.track_name, text: `"${s.track_name}"${s.artists ? " by " + s.artists.name : ""}`, url: `https://open.spotify.com/track/${s.spotify_track_id}` }),
+                    React.createElement("button", { className: "remove-btn", onClick: () => removeSong(s.id) }, React.createElement(IconX, { size: 13 }))),
+                expandedTrackId === s.id && React.createElement(SongPreviewFrame, { trackId: s.spotify_track_id }))))));
+}
+
+function useDiggingArtists(session, refreshToken) {
+    const [rows, setRows] = useState([]);
+    const [loading, setLoading] = useState(true);
+    useEffect(() => {
+        if (!session) return;
+        let cancelled = false;
+        setLoading(true);
+        (async () => {
+            const { data, error } = await bandDumpDb
+                .from("digging_artists")
+                .select("id, added_at, artist_id, artists:artist_id (id, spotify_id, name, image_url, spotify_url)")
+                .eq("user_id", session.user.id)
+                .order("added_at", { ascending: false });
+            if (cancelled) return;
+            setRows(error ? [] : (data || []).filter(r => r.artists));
+            setLoading(false);
+        })();
+        return () => { cancelled = true; };
+    }, [session, refreshToken]);
+    return { rows, loading };
+}
+
+function useDiggingSongs(session, refreshToken) {
+    const [songs, setSongs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    useEffect(() => {
+        if (!session) return;
+        let cancelled = false;
+        setLoading(true);
+        (async () => {
+            const { data, error } = await bandDumpDb
+                .from("digging_songs")
+                .select("id, spotify_track_id, track_name, album_art_url, added_at, artist_id, artists:artist_id (id, spotify_id, name, image_url, spotify_url)")
+                .eq("user_id", session.user.id)
+                .order("added_at", { ascending: false });
+            if (cancelled) return;
+            setSongs(error ? [] : (data || []));
+            setLoading(false);
+        })();
+        return () => { cancelled = true; };
+    }, [session, refreshToken]);
+    return { songs, loading };
+}
+
+// "Digging" — bands or songs you're into right now. Independent of rating/
+// queue/exclude status: sorted into two sections, Artists and Songs, each
+// shareable (Web Share sheet on mobile, clipboard-copy link on desktop).
+function DiggingTab({ session, onOpenArtist, refreshToken }) {
+    const [localRefresh, setLocalRefresh] = useState(0);
+    const { rows: artistRows, loading: artistsLoading } = useDiggingArtists(session, refreshToken + localRefresh);
+    const { songs, loading: songsLoading } = useDiggingSongs(session, refreshToken + localRefresh);
+    const [expandedTrackId, setExpandedTrackId] = useState(null);
+
+    async function removeDiggingArtist(id) {
+        await bandDumpDb.from("digging_artists").delete().eq("id", id);
+        setLocalRefresh(t => t + 1);
+    }
+    async function removeDiggingSong(id) {
+        await bandDumpDb.from("digging_songs").delete().eq("id", id);
+        setLocalRefresh(t => t + 1);
+    }
+
+    if (artistsLoading || songsLoading) return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…"));
+
+    return (React.createElement("div", null,
+        React.createElement("label", { style: { marginTop: 14, display: "block" } }, "Artists"),
+        artistRows.length === 0
+            ? React.createElement("div", { style: { color: "var(--text-faint)", fontSize: 12.5, fontStyle: "italic", marginTop: 6 } }, "No artists marked as Digging yet — hit 🔥 on an artist's page or card.")
+            : artistRows.map(r => (React.createElement("div", { className: "log-row", key: r.id },
+                r.artists.image_url ? React.createElement("img", { src: r.artists.image_url, alt: "", onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => onOpenArtist(shimArtistFromRow(r.artists)) },
+                    React.createElement("div", { className: "log-row-title" }, r.artists.name)),
+                React.createElement(ShareButton, { title: r.artists.name, text: `Digging ${r.artists.name} right now`, url: r.artists.spotify_url || "" }),
+                React.createElement("button", { className: "remove-btn", onClick: () => removeDiggingArtist(r.id) }, React.createElement(IconX, { size: 13 }))))),
+
+        React.createElement("label", { style: { marginTop: 22, display: "block" } }, "Songs"),
+        songs.length === 0
+            ? React.createElement("div", { style: { color: "var(--text-faint)", fontSize: 12.5, fontStyle: "italic", marginTop: 6 } }, "No songs marked as Digging yet — hit 🔥 next to a song in an artist's page or Search.")
+            : songs.map(s => (React.createElement(React.Fragment, { key: s.id },
+                React.createElement("div", { className: "log-row" },
+                    s.album_art_url ? React.createElement("img", { src: s.album_art_url, alt: "", style: { width: 40, height: 40 } }) : React.createElement("div", { style: { width: 40, height: 40, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                    React.createElement("div", { style: { flex: 1, cursor: s.artists ? "pointer" : "default" }, onClick: () => s.artists && onOpenArtist(shimArtistFromRow(s.artists)) },
+                        React.createElement("div", { className: "log-row-title" }, s.track_name),
+                        React.createElement("div", { className: "log-row-meta" }, s.artists ? s.artists.name : "")),
+                    React.createElement(SongPreviewToggle, { trackId: s.spotify_track_id, expanded: expandedTrackId === s.id, onToggle: () => setExpandedTrackId(expandedTrackId === s.id ? null : s.id) }),
+                    React.createElement(ShareButton, { title: s.track_name, text: `Digging "${s.track_name}"${s.artists ? " by " + s.artists.name : ""} right now`, url: `https://open.spotify.com/track/${s.spotify_track_id}` }),
+                    React.createElement("button", { className: "remove-btn", onClick: () => removeDiggingSong(s.id) }, React.createElement(IconX, { size: 13 }))),
+                expandedTrackId === s.id && React.createElement(SongPreviewFrame, { trackId: s.spotify_track_id }))))));
+}
+
+// Randomnator — pick a seed (an artist, or a specific song), pick what kind of
+// results you want back (similar artists or similar songs), hit Randomize.
+// Each result: add it (to My Artists or, for songs, straight into favorite_songs
+// so it shows up as a "My Song"), or mark it "not for me" (excludes the artist /
+// logs a recommendation_feedback "down" signal and drops it from the list).
+function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
+    const [seedType, setSeedType] = useState("artist"); // "artist" | "genre" | "song"
+    const [seedQuery, setSeedQuery] = useState("");
+    const [seedSearching, setSeedSearching] = useState(false);
+    const [seedOptions, setSeedOptions] = useState([]);
+    const [seed, setSeed] = useState(null); // { type, name, spotifyArtist?, track?, artistName? }
+    const [resultType, setResultType] = useState("artists"); // "artists" | "songs"
+    const [myArtists, setMyArtists] = useState([]); // your own rated artists, for the Artist dropdown
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            const { data } = await bandDumpDb
+                .from("user_artist_ratings")
+                .select("artists:artist_id (spotify_id, name, image_url, spotify_url)")
+                .eq("user_id", session.user.id)
+                .eq("status", "rated");
+            if (cancelled) return;
+            const list = (data || [])
+                .filter(r => r.artists)
+                .map(r => ({ name: r.artists.name, spotifyArtist: shimArtistFromRow(r.artists) }))
+                .sort((a, b) => a.name.localeCompare(b.name));
+            setMyArtists(list);
+        })();
+        return () => { cancelled = true; };
+    }, [session.user.id]);
     const [results, setResults] = useState([]);
     const [loading, setLoading] = useState(false);
     const [msg, setMsg] = useState("");
-    const [favoritedIds, setFavoritedIds] = useState([]);
-    const allGenres = useMemo(() => {
-        const s = new Set();
-        [...ratedRows, ...queuedRows].forEach(r => (r.artists.genres || []).forEach(g => s.add(g)));
-        return [...s].sort();
-    }, [ratedRows, queuedRows]);
+    const [addedIds, setAddedIds] = useState([]);
+    const [removedKeys, setRemovedKeys] = useState([]);
+    const [expandedKey, setExpandedKey] = useState(null);
+    const [artistTopTrack, setArtistTopTrack] = useState({});
+    // Artists you've already hit ☠ "not for me" on, anywhere in the app — kept as
+    // lowercased names (not just spotify_id) so a result gets filtered out the
+    // moment it's resolved, before we'd otherwise spend a Spotify lookup on it.
+    const [excludedNames, setExcludedNames] = useState(new Set());
 
-    async function runSpin() {
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            const { data } = await bandDumpDb
+                .from("user_artist_ratings")
+                .select("artists:artist_id (name)")
+                .eq("user_id", session.user.id)
+                .eq("status", "excluded");
+            if (cancelled) return;
+            setExcludedNames(new Set((data || []).map(r => r.artists && r.artists.name && r.artists.name.trim().toLowerCase()).filter(Boolean)));
+        })();
+        return () => { cancelled = true; };
+    }, [session.user.id]);
+
+    async function findSeed(e) {
+        if (e) e.preventDefault();
+        if (!seedQuery.trim()) return;
+        setSeedSearching(true);
+        setSeedOptions([]);
+        try {
+            if (seedType === "artist") {
+                const data = await spotifySearchArtists(seedQuery.trim(), 5);
+                setSeedOptions((data.artists && data.artists.items) || []);
+            } else {
+                const data = await spotifySearchTracks(seedQuery.trim(), 5);
+                setSeedOptions((data.tracks && data.tracks.items) || []);
+            }
+        } catch (e2) {
+            setMsg(e2.message || "Couldn't reach Spotify.");
+        } finally {
+            setSeedSearching(false);
+        }
+    }
+    function pickSeed(option) {
+        if (seedType === "artist") {
+            setSeed({ type: "artist", name: option.name, spotifyArtist: option });
+        } else {
+            const artistName = option.artists && option.artists[0] && option.artists[0].name;
+            setSeed({ type: "song", name: option.name, track: option, artistName });
+        }
+        setSeedOptions([]);
+        setSeedQuery("");
+        setResults([]);
+        setMsg("");
+    }
+    function pickMyArtist(entry) {
+        setSeed({ type: "artist", name: entry.name, spotifyArtist: entry.spotifyArtist });
+        setResults([]);
+        setMsg("");
+    }
+    function pickGenre(genre) {
+        if (!genre) return;
+        setSeed({ type: "genre", name: genre });
+        setResults([]);
+        setMsg("");
+    }
+    function clearSeed() {
+        setSeed(null);
+        setResults([]);
+        setMsg("");
+    }
+
+    const TARGET_RESULTS = 10;
+
+    async function randomize() {
+        if (!seed) return;
         setLoading(true);
         setMsg("");
         setResults([]);
+        setAddedIds([]);
+        setRemovedKeys([]);
         try {
-            // Seeds come from both what you've rated (weighted highest-first) and
-            // what's sitting in your queue — you don't have to rate anything before
-            // Spin has something to work from.
-            let ratedSeeds = ratedRows.filter(r => r.rating != null);
-            let queuedSeeds = queuedRows;
-            if (mode === "genre" && genre) {
-                ratedSeeds = ratedSeeds.filter(r => (r.artists.genres || []).includes(genre));
-                queuedSeeds = queuedSeeds.filter(r => (r.artists.genres || []).includes(genre));
+            if (seed.type === "genre") {
+                // A genre seed pulls straight from Last.fm's tag data (same source as
+                // Search's Genre browse) instead of a similar-to-one-artist graph —
+                // shuffled, since "top artists for a tag" would otherwise return the
+                // same head of the list every time.
+                const data = await lastfmTopArtistsByTag(seed.name, 1, 50);
+                const candidates = ((data.topartists && data.topartists.artist) || [])
+                    .filter(a => !excludedNames.has((a.name || "").trim().toLowerCase()))
+                    .sort(() => Math.random() - 0.5);
+                const enriched = [];
+                for (const a of candidates) {
+                    if (enriched.length >= TARGET_RESULTS) break;
+                    try {
+                        const spotifyArtist = await resolveArtistByName(a.name);
+                        if (!spotifyArtist) continue;
+                        if (resultType === "artists") {
+                            enriched.push({ kind: "artist", key: spotifyArtist.id, name: a.name, spotifyArtist });
+                        } else {
+                            const top = await spotifyTopSongsFallback(a.name, spotifyArtist.id, 1);
+                            if (top[0]) enriched.push({ kind: "song", key: top[0].id, track: top[0], artistName: a.name });
+                        }
+                    } catch (e2) { /* skip candidates Spotify can't resolve */ }
+                }
+                if (enriched.length === 0) setMsg(`Couldn't find ${resultType} for the "${seed.name}" genre.`);
+                setResults(enriched);
+                return;
             }
-            ratedSeeds = [...ratedSeeds].sort((a, b) => b.rating - a.rating).slice(0, 4).map(r => ({ row: r, source: "rated" }));
-            queuedSeeds = queuedSeeds.slice(0, 4).map(r => ({ row: r, source: "queued" }));
-            const seeds = [...ratedSeeds, ...queuedSeeds];
-            if (seeds.length === 0) { setMsg("Rate or queue a few artists first so Spin has something to work from."); setLoading(false); return; }
 
-            const knownNames = new Set([...ratedRows, ...queuedRows].map(r => r.artists.name.toLowerCase()));
-            const candidates = new Map();
-            for (const seed of seeds) {
-                try {
-                    const data = await lastfmSimilarArtists(seed.row.artists.name, 8);
-                    const similar = (data.similarartists && data.similarartists.artist) || [];
-                    similar.forEach(s => {
-                        const key = s.name.toLowerCase();
-                        if (knownNames.has(key) || candidates.has(key)) return;
-                        candidates.set(key, { name: s.name, match: parseFloat(s.match || "0"), fromSeed: seed.row.artists.name, fromSource: seed.source });
-                    });
-                } catch (e) { /* one seed failing shouldn't kill the whole spin */ }
+            const seedArtistName = seed.type === "artist" ? seed.name : seed.artistName;
+            if (resultType === "artists") {
+                if (!seedArtistName) { setMsg("Couldn't tell which artist to work from."); return; }
+                const data = await lastfmSimilarArtists(seedArtistName, 30);
+                const similar = ((data.similarartists && data.similarartists.artist) || [])
+                    .filter(s => !excludedNames.has((s.name || "").trim().toLowerCase()));
+                const enriched = [];
+                for (const s of similar) {
+                    if (enriched.length >= TARGET_RESULTS) break;
+                    try {
+                        const spotifyArtist = await resolveArtistByName(s.name);
+                        if (spotifyArtist) enriched.push({ kind: "artist", key: spotifyArtist.id, name: s.name, spotifyArtist });
+                    } catch (e2) { /* skip candidates Spotify can't resolve */ }
+                }
+                if (enriched.length === 0) setMsg(`Last.fm didn't have similar-artist data for ${seedArtistName}.`);
+                setResults(enriched);
+            } else {
+                let candidateNames = [];
+                if (seed.type === "song") {
+                    const data = await lastfmSimilarTracks(seedArtistName, seed.name, 30);
+                    candidateNames = ((data.similartracks && data.similartracks.track) || [])
+                        .filter(t => !excludedNames.has(((t.artist && t.artist.name) || "").trim().toLowerCase()))
+                        .map(t => ({ track: t.name, artist: t.artist && t.artist.name }));
+                } else {
+                    const data = await lastfmSimilarArtists(seedArtistName, 25);
+                    const similar = ((data.similarartists && data.similarartists.artist) || [])
+                        .filter(s => !excludedNames.has((s.name || "").trim().toLowerCase()));
+                    candidateNames = similar.map(s => ({ track: null, artist: s.name }));
+                }
+                const enriched = [];
+                for (const c of candidateNames) {
+                    if (enriched.length >= TARGET_RESULTS) break;
+                    try {
+                        const q = c.track ? `track:${c.track} artist:${c.artist}` : `artist:${c.artist}`;
+                        const data = await spotifySearchTracks(q, 1);
+                        const track = data.tracks && data.tracks.items && data.tracks.items[0];
+                        if (track) enriched.push({ kind: "song", key: track.id, track, artistName: c.artist });
+                    } catch (e2) { /* skip candidates Spotify can't resolve */ }
+                }
+                if (enriched.length === 0) setMsg(`Last.fm didn't have similar-song data for "${seed.name}".`);
+                setResults(enriched);
             }
-            const ranked = [...candidates.values()].sort((a, b) => b.match - a.match).slice(0, 8);
-            if (ranked.length === 0) { setMsg("Last.fm didn't have similar-artist data for your picks. Try rating or queueing a few more well-known artists."); setLoading(false); return; }
-
-            const enriched = [];
-            for (const c of ranked) {
-                try {
-                    const artistData = await spotifySearchArtists(c.name, 1);
-                    const spotifyArtist = artistData.artists && artistData.artists.items && artistData.artists.items[0];
-                    const trackData = await spotifySearchTracks(`artist:${c.name}`, 1);
-                    const track = trackData.tracks && trackData.tracks.items && trackData.tracks.items[0];
-                    enriched.push({ ...c, spotifyArtist, track });
-                } catch (e) { /* skip candidates Spotify can't resolve */ }
-            }
-            setResults(enriched);
         } catch (e) {
             setMsg(e.message || "Something went wrong.");
         } finally {
@@ -1706,41 +2180,131 @@ function MusicSpinTab({ session, onOpenArtist, onChanged }) {
         }
     }
 
-    async function sendFeedback(track, signal) {
-        if (!track) return;
-        await bandDumpDb.from("recommendation_feedback").insert({ user_id: session.user.id, spotify_track_id: track.id, signal });
-    }
-    async function favoriteResult(spotifyArtist) {
-        if (!spotifyArtist) return;
+    async function addArtistResult(r) {
         try {
-            await quickFavoriteArtist(spotifyArtist, session.user.id);
-            setFavoritedIds(prev => [...prev, spotifyArtist.id]);
+            await quickFavoriteArtist(r.spotifyArtist, session.user.id);
+            setAddedIds(prev => [...prev, r.key]);
             onChanged && onChanged();
         } catch (e) { setMsg(e.message); }
     }
+    async function notForMeArtist(r) {
+        try {
+            await excludeArtist(r.spotifyArtist, session.user.id);
+            setRemovedKeys(prev => [...prev, r.key]);
+            // Remember it locally too, so it's filtered out of results immediately —
+            // without waiting on a re-fetch — the next time Randomize runs, and never
+            // gets suggested again.
+            setExcludedNames(prev => new Set([...prev, (r.name || r.spotifyArtist.name || "").trim().toLowerCase()]));
+            onChanged && onChanged();
+        } catch (e) { setMsg(e.message); }
+    }
+    // Lazily resolves and plays an artist result's most popular Spotify song —
+    // fetched once per row and cached, so repeat toggling doesn't re-fetch.
+    async function toggleArtistPreview(r) {
+        if (expandedKey === r.key) { setExpandedKey(null); return; }
+        if (artistTopTrack[r.key] === undefined) {
+            try {
+                const top = await spotifyTopSongsFallback(r.name, r.spotifyArtist.id, 1);
+                setArtistTopTrack(prev => ({ ...prev, [r.key]: (top[0] && top[0].id) || null }));
+            } catch (e2) {
+                setArtistTopTrack(prev => ({ ...prev, [r.key]: null }));
+            }
+        }
+        setExpandedKey(r.key);
+    }
+    async function addSongResult(r) {
+        try {
+            const spotifyArtist = await resolveArtistByName(r.artistName || (r.track.artists[0] && r.track.artists[0].name) || "");
+            const row = spotifyArtist ? await ensureArtistRow(spotifyArtist) : null;
+            const art = (r.track.album && r.track.album.images && r.track.album.images[0] && r.track.album.images[0].url) || null;
+            const { error: err } = await bandDumpDb.from("favorite_songs").insert({ user_id: session.user.id, artist_id: row ? row.id : null, spotify_track_id: r.track.id, track_name: r.track.name, album_art_url: art });
+            if (err && err.code !== "23505") { setMsg(err.message); return; }
+            setAddedIds(prev => [...prev, r.key]);
+            onChanged && onChanged();
+        } catch (e) { setMsg(e.message); }
+    }
+    async function notForMeSong(r) {
+        try {
+            await bandDumpDb.from("recommendation_feedback").insert({ user_id: session.user.id, spotify_track_id: r.track.id, signal: "down" });
+            setRemovedKeys(prev => [...prev, r.key]);
+        } catch (e) { setMsg(e.message); }
+    }
+
+    const visibleResults = results.filter(r => !removedKeys.includes(r.key));
 
     return (React.createElement("div", null,
-        React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", margin: "14px 0", flexWrap: "wrap" } },
-            React.createElement("select", { value: mode, onChange: e => setMode(e.target.value) },
-                React.createElement("option", { value: "overall" }, "Overall"),
-                React.createElement("option", { value: "genre" }, "By genre")),
-            mode === "genre" && React.createElement("select", { value: genre, onChange: e => setGenre(e.target.value) },
-                React.createElement("option", { value: "" }, "Choose a genre…"),
-                allGenres.map(g => React.createElement("option", { value: g, key: g }, g))),
-            React.createElement("button", { className: "primary", onClick: runSpin, disabled: loading }, loading ? "Spinning…" : "Spin")),
-        React.createElement("div", { style: { color: "var(--text-dim)", fontSize: 12, marginBottom: 10 } }, "Built from your ratings and queue, plus Last.fm's similar-artist graph — not Spotify's own recommendations."),
+        React.createElement("div", { style: { color: "var(--text-dim)", fontSize: 12, margin: "14px 0 10px" } }, "Pick a starting point, choose what you want back, hit Randomize."),
+
+        React.createElement("div", { className: "pill-group" },
+            React.createElement("button", { className: `pill ${seedType === "artist" ? "selected" : ""}`, onClick: () => { setSeedType("artist"); setSeedOptions([]); } }, "Artist"),
+            React.createElement("button", { className: `pill ${seedType === "genre" ? "selected" : ""}`, onClick: () => { setSeedType("genre"); setSeedOptions([]); } }, "Genre"),
+            React.createElement("button", { className: `pill ${seedType === "song" ? "selected" : ""}`, onClick: () => { setSeedType("song"); setSeedOptions([]); } }, "Song")),
+
+        !seed ? React.createElement(React.Fragment, null,
+            seedType === "artist" && React.createElement("select", {
+                value: "", style: { margin: "10px 0" },
+                onChange: e => { const entry = myArtists.find(m => m.spotifyArtist.id === e.target.value); if (entry) pickMyArtist(entry); },
+            },
+                React.createElement("option", { value: "", disabled: true }, myArtists.length ? "Choose one of your artists…" : "Rate some artists first to pick from here"),
+                myArtists.map(m => React.createElement("option", { key: m.spotifyArtist.id, value: m.spotifyArtist.id }, m.name))),
+            seedType === "genre" && React.createElement("select", {
+                value: "", style: { margin: "10px 0" },
+                onChange: e => pickGenre(e.target.value),
+            },
+                React.createElement("option", { value: "", disabled: true }, "Choose a genre…"),
+                MUSIC_GENRES.map(g => React.createElement("option", { key: g, value: g }, g))),
+            seedType === "song" && React.createElement(React.Fragment, null,
+                React.createElement("form", { onSubmit: findSeed, style: { display: "flex", gap: 8, margin: "10px 0" } },
+                    React.createElement("input", { type: "text", placeholder: "Find a song to start from…", value: seedQuery, onChange: e => setSeedQuery(e.target.value) }),
+                    React.createElement("button", { className: "primary", type: "submit", disabled: seedSearching }, seedSearching ? "…" : "Find")),
+                seedOptions.length > 0 && React.createElement("div", { style: { marginTop: 4 } },
+                    seedOptions.map(o => React.createElement("div", { className: "log-row", key: o.id, onClick: () => pickSeed(o), style: { cursor: "pointer" } },
+                        (o.album && o.album.images && o.album.images[0] && o.album.images[0].url)
+                            ? React.createElement("img", { src: o.album.images[0].url, alt: "", style: { width: 40, height: 40 } })
+                            : React.createElement("div", { style: { width: 40, height: 40, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                        React.createElement("div", { style: { flex: 1 } },
+                            React.createElement("div", { className: "log-row-title" }, o.name),
+                            React.createElement("div", { className: "log-row-meta" }, (o.artists || []).map(a => a.name).join(", "))))))))
+            : React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, margin: "10px 0" } },
+                React.createElement("span", { style: { fontSize: 13 } }, `Seed: ${seed.name}${seed.type === "song" ? " · " + seed.artistName : ""}`),
+                React.createElement("button", { className: "ghost", onClick: clearSeed }, "Change")),
+
+        seed && React.createElement(React.Fragment, null,
+            React.createElement("div", { style: { fontSize: 12, color: "var(--text-dim)", marginTop: 10 } }, "Looking for:"),
+            React.createElement("div", { className: "pill-group", style: { marginTop: 4 } },
+                React.createElement("button", { className: `pill ${resultType === "artists" ? "selected" : ""}`, onClick: () => setResultType("artists") }, "Bands"),
+                React.createElement("button", { className: `pill ${resultType === "songs" ? "selected" : ""}`, onClick: () => setResultType("songs") }, "Songs")),
+            React.createElement("button", { className: "primary", style: { marginTop: 10 }, onClick: randomize, disabled: loading }, loading ? "Randomizing…" : "Randomize")),
+
         msg && React.createElement("div", { className: "empty" }, React.createElement("div", null, msg)),
-        results.map((r, i) => (React.createElement("div", { className: "log-row", key: i },
-            r.spotifyArtist && r.spotifyArtist.images && r.spotifyArtist.images.length
-                ? React.createElement("img", { src: r.spotifyArtist.images[0].url, alt: "", style: { cursor: r.spotifyArtist ? "pointer" : "default" }, onClick: () => r.spotifyArtist && onOpenArtist(r.spotifyArtist) })
-                : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
-            React.createElement("div", { style: { flex: 1, cursor: r.spotifyArtist ? "pointer" : "default" }, onClick: () => r.spotifyArtist && onOpenArtist(r.spotifyArtist) },
-                React.createElement("div", { className: "log-row-title" }, r.name),
-                React.createElement("div", { className: "log-row-meta" }, `because you ${r.fromSource === "queued" ? "queued" : "rated"} ${r.fromSeed}${r.fromSource === "queued" ? "" : " highly"}${r.track ? ` · try "${r.track.name}"` : ""}`)),
-            r.spotifyArtist && React.createElement("button", { className: `fav-heart-btn ${favoritedIds.includes(r.spotifyArtist.id) ? "favorited" : ""}`, onClick: () => favoriteResult(r.spotifyArtist), title: "Add to favorite artists" }, favoritedIds.includes(r.spotifyArtist.id) ? "♥" : "♡"),
-            r.track && r.track.external_urls && React.createElement("a", { href: r.track.external_urls.spotify, target: "_blank", rel: "noopener", className: "remove-btn", title: "Open in Spotify" }, "↗"),
-            React.createElement("button", { className: "remove-btn", onClick: () => sendFeedback(r.track, "up"), title: "More like this" }, "👍"),
-            React.createElement("button", { className: "remove-btn", onClick: () => sendFeedback(r.track, "down"), title: "Not for me" }, "👎"))))));
+
+        visibleResults.map(r => r.kind === "artist"
+            ? React.createElement(React.Fragment, { key: r.key },
+                React.createElement("div", { className: "log-row" },
+                    r.spotifyArtist.images && r.spotifyArtist.images.length
+                        ? React.createElement("img", { src: r.spotifyArtist.images[0].url, alt: "", style: { cursor: "pointer" }, onClick: () => onOpenArtist(r.spotifyArtist) })
+                        : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                    React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => onOpenArtist(r.spotifyArtist) },
+                        React.createElement("div", { className: "log-row-title" }, r.name),
+                        React.createElement("div", { className: "log-row-meta" }, `similar to ${seed.name}`)),
+                    React.createElement("button", { className: "ghost", style: { padding: "5px 8px", fontSize: 11.5 }, onClick: () => toggleArtistPreview(r), title: expandedKey === r.key ? "Hide player" : "Play their top song" }, expandedKey === r.key ? "✕" : "▶"),
+                    React.createElement("button", { className: `fav-heart-btn ${addedIds.includes(r.key) ? "favorited" : ""}`, style: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }, onClick: () => addArtistResult(r), title: "Add to My Artists" }, React.createElement(IconBolt, { size: 14, filled: addedIds.includes(r.key) }), addedIds.includes(r.key) ? "Added" : "My Artists"),
+                    React.createElement("button", { className: "exclude-btn", onClick: () => notForMeArtist(r), title: "Not for me — never suggest again" }, "☠")),
+                expandedKey === r.key && (artistTopTrack[r.key]
+                    ? React.createElement(SongPreviewFrame, { trackId: artistTopTrack[r.key] })
+                    : React.createElement("div", { style: { fontSize: 11.5, color: "var(--text-faint)", padding: "2px 0 10px" } }, artistTopTrack[r.key] === null ? "Couldn't find a song for them on Spotify." : "Loading…")))
+            : React.createElement(React.Fragment, { key: r.key },
+                React.createElement("div", { className: "log-row" },
+                    (r.track.album && r.track.album.images && r.track.album.images[0] && r.track.album.images[0].url)
+                        ? React.createElement("img", { src: r.track.album.images[0].url, alt: "", style: { width: 46, height: 46 } })
+                        : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                    React.createElement("div", { style: { flex: 1 } },
+                        React.createElement("div", { className: "log-row-title" }, r.track.name),
+                        React.createElement("div", { className: "log-row-meta" }, `${r.artistName || (r.track.artists[0] && r.track.artists[0].name) || ""} · similar to ${seed.name}`)),
+                    React.createElement(SongPreviewToggle, { trackId: r.track.id, expanded: expandedKey === r.key, onToggle: () => setExpandedKey(expandedKey === r.key ? null : r.key) }),
+                    React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: addedIds.includes(r.key) ? "var(--gold)" : undefined }, onClick: () => addSongResult(r), title: "Add to My Songs" }, addedIds.includes(r.key) ? "Added" : "+ My Songs"),
+                    React.createElement("button", { className: "exclude-btn", onClick: () => notForMeSong(r), title: "Not for me" }, "☠")),
+                expandedKey === r.key && React.createElement(SongPreviewFrame, { trackId: r.track.id })))));
 }
 
 function MusicApp({ session, onRequireLogin }) {
@@ -1761,12 +2325,16 @@ function MusicApp({ session, onRequireLogin }) {
         React.createElement("div", { className: "tabs" },
             React.createElement("button", { className: `tab ${musicTab === "discover" ? "active" : ""}`, onClick: () => setMusicTab("discover") }, "Search"),
             React.createElement("button", { className: `tab ${musicTab === "my-artists" ? "active" : ""}`, onClick: () => setMusicTab("my-artists") }, "My Artists"),
+            React.createElement("button", { className: `tab ${musicTab === "my-songs" ? "active" : ""}`, onClick: () => setMusicTab("my-songs") }, "My Songs"),
+            React.createElement("button", { className: `tab ${musicTab === "digging" ? "active" : ""}`, onClick: () => setMusicTab("digging") }, "Digging"),
             React.createElement("button", { className: `tab ${musicTab === "queue" ? "active" : ""}`, onClick: () => setMusicTab("queue") }, "Queue"),
-            React.createElement("button", { className: `tab ${musicTab === "spin" ? "active" : ""}`, onClick: () => setMusicTab("spin") }, "Spin")),
+            React.createElement("button", { className: `tab ${musicTab === "spin" ? "active" : ""}`, onClick: () => setMusicTab("spin") }, "Randomnator")),
         musicTab === "discover" && React.createElement(MusicDiscoverTab, { onOpenArtist: setOpenArtist, session, onChanged: () => setRefreshToken(t => t + 1) }),
         musicTab === "my-artists" && React.createElement(MusicMyArtistsTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
+        musicTab === "my-songs" && React.createElement(MusicMySongsTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
+        musicTab === "digging" && React.createElement(DiggingTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
         musicTab === "queue" && React.createElement(MusicQueueTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
-        musicTab === "spin" && React.createElement(MusicSpinTab, { session, onOpenArtist: setOpenArtist, onChanged: () => setRefreshToken(t => t + 1) }),
+        musicTab === "spin" && React.createElement(MusicRandomnatorTab, { session, onOpenArtist: setOpenArtist, onChanged: () => setRefreshToken(t => t + 1) }),
         openArtist && React.createElement(ArtistDetailModal, { spotifyArtist: openArtist, session, onClose: () => setOpenArtist(null), onChanged: () => setRefreshToken(t => t + 1) })));
 }
 
