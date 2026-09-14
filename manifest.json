@@ -1,7 +1,7 @@
 {
-  "name": "DIALD — Movie Log",
+  "name": "DIALD — Movies & Music",
   "short_name": "DIALD",
-  "description": "Your taste. Diald in. Track, rate, and get recommended movies.",
+  "description": "Your taste. Diald in. Track, rate, and get recommended movies and music.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
