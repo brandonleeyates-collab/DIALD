@@ -1,3 +1,28 @@
+
+Brandon’s MacBook Pro (2), Connected
+/
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Diald index updated · TXT
+Title: 
+URL: https://raw.githubusercontent.com
+Source element: <body>
+---
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -33,25 +58,25 @@
     --divider: #3D3120;
     --divider-soft: #332A1B;
     --danger: #C2604A;
-
+ 
     --radius-sm: 4px;
     --radius-md: 8px;
     --radius-lg: 14px;
     --radius-pill: 999px;
-
+ 
     --shadow-sm: 0 1px 2px rgba(0,0,0,0.25), 0 1px 1px rgba(0,0,0,0.15);
     --shadow-md: 0 6px 16px rgba(0,0,0,0.32);
     --shadow-lg: 0 16px 40px rgba(0,0,0,0.45);
-
+ 
     --ease: cubic-bezier(0.22, 1, 0.36, 1);
     --fast: 140ms;
     --med: 220ms;
   }
-
+ 
   * { box-sizing: border-box; margin: 0; padding: 0; }
-
+ 
   html { scroll-behavior: smooth; }
-
+ 
   body {
     background: var(--bg);
     background-image:
@@ -62,14 +87,14 @@
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
   }
-
+ 
   .display {
     font-family: 'Archivo Black', sans-serif;
     letter-spacing: 0.005em;
   }
-
+ 
   #root { max-width: 900px; margin: 0 auto; padding: 28px 20px 100px; }
-
+ 
   /* Header / branding */
   .header {
     display: flex;
@@ -117,7 +142,7 @@
     font-variant-numeric: tabular-nums;
     margin-bottom: 2px;
   }
-
+ 
   /* Tabs — segmented control */
   .tabs {
     display: flex;
@@ -150,7 +175,7 @@
     background: var(--accent);
     box-shadow: var(--shadow-sm);
   }
-
+ 
   /* Search */
   .search-row {
     display: flex;
@@ -174,9 +199,9 @@
     box-shadow: 0 0 0 3px rgba(224,122,61,0.14);
   }
   input[type="text"]::placeholder { color: var(--text-faint); }
-
+ 
   button { font-family: 'Inter', sans-serif; }
-
+ 
   button.primary {
     background: var(--accent);
     color: #211A13;
@@ -192,7 +217,7 @@
   button.primary:hover { background: var(--accent-bright); box-shadow: var(--shadow-md); }
   button.primary:active { transform: scale(0.97); }
   button.primary:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
-
+ 
   button.primary, button.ghost, .card button.log-btn {
     display: inline-flex;
     align-items: center;
@@ -212,7 +237,7 @@
   button.ghost:hover { border-color: var(--text-dim); color: var(--text); background: rgba(255,255,255,0.02); }
   button.ghost:active { transform: scale(0.97); }
   button.ghost:disabled { opacity: 0.5; cursor: default; }
-
+ 
   /* Grid of results/log */
   .grid {
     display: grid;
@@ -290,7 +315,7 @@
     transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease);
   }
   .card button.log-btn:hover { border-color: var(--accent); color: var(--accent); }
-
+ 
   /* Cert badge */
   .cert-badge {
     display: inline-block;
@@ -304,7 +329,7 @@
     margin-left: 6px;
     vertical-align: middle;
   }
-
+ 
   /* Platform badges */
   .platform-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 7px; }
   .platform-chip {
@@ -320,7 +345,7 @@
   }
   .platform-chip:hover { background: rgba(111,163,174,0.22); border-color: var(--sage); }
   .platform-chip.none { color: var(--text-faint); border-color: var(--divider); cursor: default; background: none; }
-
+ 
   /* Log list view */
   .log-row {
     display: flex;
@@ -359,12 +384,12 @@
     transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
   }
   .log-row .remove-btn:hover { color: var(--danger); background: rgba(194,96,74,0.1); }
-
+ 
   /* Empty state */
   .empty { text-align: center; padding: 64px 20px; color: var(--text-dim); }
   .empty .display { font-size: 22px; color: var(--text); margin-bottom: 8px; }
   .empty > div:last-child { font-size: 13.5px; line-height: 1.5; max-width: 340px; margin: 0 auto; }
-
+ 
   /* Modals */
   .modal-overlay {
     position: fixed;
@@ -397,18 +422,9 @@
   .modal h3 { font-size: 20px; margin-bottom: 4px; }
   .modal .modal-sub { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
   .modal label { display: block; font-size: 12px; font-weight: 700; color: var(--text-dim); margin-bottom: 6px; margin-top: 14px; }
-  .rating-input-row { display: flex; align-items: center; gap: 12px; }
-  input[type="range"] { flex: 1; accent-color: var(--accent); height: 4px; }
-  .rating-display {
-    font-family: 'Archivo Black', sans-serif;
-    font-size: 26px;
-    color: var(--accent);
-    min-width: 56px;
-    font-variant-numeric: tabular-nums;
-  }
   .modal-actions { display: flex; gap: 8px; margin-top: 24px; }
   .modal-actions button { flex: 1; }
-
+ 
   .modal-close-x {
     position: absolute;
     top: 12px; right: 12px;
@@ -425,7 +441,7 @@
     transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
   }
   .modal-close-x:hover { background: rgba(255,255,255,0.08); color: var(--text); }
-
+ 
   /* Cast */
   .cast-section-label { display: block; font-size: 11.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-faint); margin-bottom: 9px; margin-top: 16px; }
   .cast-person { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; }
@@ -442,7 +458,7 @@
     transition: border-color var(--fast) var(--ease), color var(--fast) var(--ease), background var(--fast) var(--ease);
   }
   .cast-chip:hover { border-color: var(--accent); color: var(--accent); background: rgba(224,122,61,0.06); }
-
+ 
   /* Quiz / filters */
   .quiz-card {
     background: var(--bg-raised);
@@ -472,9 +488,9 @@
     color: var(--accent);
     background: rgba(224,122,61,0.12);
   }
-
+ 
   .services-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
-
+ 
   .rec-card {
     background: var(--bg-raised);
     border: 1px solid var(--divider);
@@ -501,9 +517,9 @@
     margin-bottom: 9px;
   }
   .rec-why { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
-
+ 
   .loading { text-align: center; padding: 48px; color: var(--text-dim); font-size: 13.5px; }
-
+ 
   .setup-notice {
     background: var(--bg-raised);
     border: 1px solid var(--divider);
@@ -517,9 +533,9 @@
   }
   .setup-notice strong { color: var(--text); }
   .setup-notice input { margin-top: 10px; width: 100%; }
-
+ 
   .see-more-row { text-align: center; margin-top: 18px; }
-
+ 
   /* Autocomplete */
   .search-row { position: relative; }
   .autocomplete-dropdown {
@@ -548,7 +564,7 @@
   .autocomplete-item:hover { background: rgba(255,255,255,0.04); }
   .autocomplete-item img { width: 30px; height: 30px; border-radius: var(--radius-sm); object-fit: cover; flex-shrink: 0; background: var(--divider); }
   .autocomplete-item .ac-sub { color: var(--text-dim); font-size: 11px; }
-
+ 
   /* Scroll to top */
   .scroll-top-btn {
     position: fixed;
@@ -568,37 +584,56 @@
   }
   @keyframes popIn { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: scale(1); } }
   .scroll-top-btn:hover { background: var(--accent-bright); transform: translateY(-2px); }
-
+ 
   ::-webkit-scrollbar { width: 9px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--divider); border-radius: 5px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--divider-soft); }
-
+ 
   /* --- Mode switch (Movies / Music) --- */
   .mode-switch { display: inline-flex; gap: 2px; background: var(--bg-raised); border: 1px solid var(--divider); border-radius: var(--radius-pill); padding: 3px; margin-bottom: 10px; }
   .mode-switch button { border: none; background: transparent; color: var(--text-dim); font-size: 12.5px; font-weight: 700; padding: 6px 14px; border-radius: var(--radius-pill); cursor: pointer; transition: background var(--fast) var(--ease), color var(--fast) var(--ease); }
   .mode-switch button.active { background: var(--accent); color: #1a1209; }
   .mode-switch button:not(.active):hover { color: var(--text); }
-
+ 
   /* --- Music mode: genre tags --- */
   .genre-tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
   .genre-tag { background: var(--bg-raised-2); border: 1px solid var(--divider); color: var(--olive); font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: var(--radius-pill); }
   .genre-tag.removable { padding-right: 6px; display: inline-flex; align-items: center; gap: 5px; }
   .genre-tag.removable button { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
   .genre-tag.removable button:hover { color: var(--danger); }
-
+ 
   /* --- Music mode: artist hero in detail modal --- */
   .artist-hero { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 4px; }
   .artist-hero img, .artist-hero .art-fallback { width: 88px; height: 88px; border-radius: var(--radius-md); object-fit: cover; background: var(--bg-raised-2); flex-shrink: 0; }
   .artist-hero h3 { margin-bottom: 2px; }
-
-  .rating-slider-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
-  .rating-slider-row .rating-live-value { font-weight: 800; color: var(--accent); min-width: 2.6em; text-align: right; font-variant-numeric: tabular-nums; }
+ 
+  /* --- Rating buttons (replaces the numeric slider, both Movies & Music) --- */
+  .rating-btn-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; max-height: 168px; overflow-y: auto; padding: 4px 2px; }
+  .rating-btn { border: 1px solid var(--divider); background: var(--bg-raised-2); color: var(--text); font-size: 12px; font-weight: 700; padding: 6px 10px; border-radius: var(--radius-pill); cursor: pointer; font-variant-numeric: tabular-nums; transition: background var(--fast) var(--ease), color var(--fast) var(--ease), border-color var(--fast) var(--ease); }
+  .rating-btn:hover { border-color: var(--accent); }
+  .rating-btn.selected { background: var(--accent); color: #1a1209; border-color: var(--accent); }
+ 
+  /* --- Music mode: top songs / about section --- */
+  .artist-bio { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; margin: 6px 0 0; }
+  .artist-bio a { color: var(--sage); }
+  .music-section-actions { display: flex; gap: 6px; align-items: center; }
+  .fav-heart-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
+  .fav-heart-btn:hover { color: var(--accent); }
+  .fav-heart-btn.favorited { color: var(--accent); }
+  .card-fav-heart { position: absolute; top: 6px; right: 6px; background: rgba(20,16,10,0.55); border: none; border-radius: 50%; width: 28px; height: 28px; color: #fff; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+  .card-fav-heart.favorited { color: var(--accent); }
+  .poster-wrap { position: relative; }
+ 
+  /* --- Music mode: genre browse --- */
+  .genre-pick-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
+  .pagination-row { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 18px 0; font-size: 12.5px; color: var(--text-dim); }
+  .pagination-row button:disabled { opacity: 0.4; cursor: default; }
 </style>
 </head>
 <body>
 <div id="root"></div>
-
+ 
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script>
@@ -613,7 +648,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabaseClient = (window.supabase && window.supabase.createClient)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
-
+ 
 // ---------- BandDump (Music mode) ----------
 // Shares this same Supabase project/auth as the movie side, just its own
 // `banddump` schema, so one login covers both modes. Spotify/Last.fm go
@@ -622,7 +657,7 @@ const supabaseClient = (window.supabase && window.supabase.createClient)
 const bandDumpDb = supabaseClient ? supabaseClient.schema("banddump") : null;
 let bandDumpAccessToken = null; // kept in sync with the movie-side session, see App()
 function setBandDumpToken(session) { bandDumpAccessToken = (session && session.access_token) || null; }
-
+ 
 async function bandDumpCallFn(name, params) {
     const token = bandDumpAccessToken || SUPABASE_ANON_KEY;
     const qs = new URLSearchParams(params).toString();
@@ -636,7 +671,60 @@ async function bandDumpCallFn(name, params) {
 const spotifySearchArtists = (q, limit = 10) => bandDumpCallFn("spotify-proxy", { action: "search", type: "artist", q, limit });
 const spotifySearchTracks = (q, limit = 10) => bandDumpCallFn("spotify-proxy", { action: "search", type: "track", q, limit });
 const lastfmSimilarArtists = (artist, limit = 10) => bandDumpCallFn("lastfm-proxy", { action: "similar-artists", artist, limit });
-
+const lastfmArtistInfo = (artist) => bandDumpCallFn("lastfm-proxy", { action: "artist-info", artist });
+const lastfmTopArtistsByTag = (tag, page = 1, limit = 25) => bandDumpCallFn("lastfm-proxy", { action: "top-artists-by-tag", tag, page, limit });
+ 
+// Spotify's own top-tracks endpoint (GET /v1/artists/{id}/top-tracks) is closed to
+// apps created after Nov 2024 (this one) — confirmed via a live 403. `search`
+// filtered by `artist:"Name"` is the documented, universal fallback, and it's what
+// the "Top Songs" list below actually uses.
+const spotifyTopSongsFallback = async (artistName, limit = 10) => {
+    const data = await spotifySearchTracks(`artist:"${artistName}"`, limit);
+    const tracks = (data.tracks && data.tracks.items) || [];
+    return [...tracks].sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+};
+ 
+// Curated tag list for genre browsing — Last.fm's own tag list is user-generated
+// and noisy, so we stick to well-known genres its tag.gettopartists understands.
+const MUSIC_GENRES = [
+    "rock", "pop", "hip hop", "indie", "indie rock", "indie pop", "alternative rock",
+    "electronic", "house", "techno", "ambient", "metal", "punk", "jazz", "classical",
+    "country", "folk", "singer-songwriter", "r&b", "soul", "funk", "reggae",
+    "blues", "k-pop", "latin", "grunge",
+];
+ 
+function stripHtml(s) {
+    return (s || "").replace(/<[^>]*>/g, "").trim();
+}
+ 
+function lastfmImage(images) {
+    if (!images || !images.length) return null;
+    for (let i = images.length - 1; i >= 0; i--) {
+        if (images[i] && images[i]["#text"]) return images[i]["#text"];
+    }
+    return null;
+}
+ 
+// Shared "favorite" quick-add: puts an artist straight into My Artists without
+// making the user pick a number first. Keeps an existing rating if there is one.
+async function quickFavoriteArtist(spotifyArtist, userId) {
+    const row = await ensureArtistRow(spotifyArtist);
+    const { data: existing } = await bandDumpDb.from("user_artist_ratings").select("rating").eq("user_id", userId).eq("artist_id", row.id).maybeSingle();
+    const rating = (existing && existing.rating != null) ? Number(existing.rating) : 8.0;
+    const { error } = await bandDumpDb.from("user_artist_ratings").upsert({ user_id: userId, artist_id: row.id, rating, status: "rated", rated_at: new Date().toISOString() });
+    if (error) throw error;
+    return row;
+}
+ 
+// Used by genre-browse: we already know the genre the user picked it under, so
+// attach that tag directly rather than relying only on Last.fm's guess-work.
+async function attachGenreTag(artistId, genre) {
+    const g = (genre || "").trim().toLowerCase();
+    if (!g) return;
+    const { error } = await bandDumpDb.from("artist_genres").insert({ artist_id: artistId, genre: g });
+    if (error && error.code !== "23505") throw error; // 23505 = already tagged, fine
+}
+ 
 async function ensureArtistRow(spotifyArtist) {
     const { data: existing } = await bandDumpDb.from("artists").select("*").eq("spotify_id", spotifyArtist.id).maybeSingle();
     if (existing) return existing;
@@ -648,13 +736,24 @@ async function ensureArtistRow(spotifyArtist) {
         spotify_url: (spotifyArtist.external_urls && spotifyArtist.external_urls.spotify) || null,
     }).select().single();
     if (error) throw error;
-    const genres = spotifyArtist.genres || [];
+    let genres = spotifyArtist.genres || [];
+    // Spotify's Dev Mode tier strips the `genres` field from artist objects entirely
+    // (confirmed live — search and single-artist lookups both come back without it),
+    // so fall back to Last.fm's community tags to get a first pass of genres attached.
+    // Still editable per-artist afterward from the artist page.
+    if (!genres.length) {
+        try {
+            const info = await lastfmArtistInfo(spotifyArtist.name);
+            const tags = (info.artist && info.artist.tags && info.artist.tags.tag) || [];
+            genres = tags.slice(0, 4).map(t => t.name.toLowerCase());
+        } catch (e) { /* no genre data available anywhere — fine, can still be tagged manually */ }
+    }
     if (genres.length) {
         await bandDumpDb.from("artist_genres").insert(genres.map(g => ({ artist_id: inserted.id, genre: g })));
     }
     return inserted;
 }
-
+ 
 const ALL_SERVICES = ["Netflix", "Prime Video", "Max", "Hulu", "Disney Plus", "Apple TV Plus", "Peacock", "Paramount Plus", "Tubi", "Pluto TV", "Starz", "Showtime", "Sling TV"];
 const PROVIDER_IDS = {
     "Netflix": 8,
@@ -857,13 +956,13 @@ function ScrollToTop() {
     return (React.createElement("button", { className: "scroll-top-btn", onClick: () => window.scrollTo({ top: 0, behavior: "smooth" }), title: "Back to top" },
         React.createElement(IconArrowUp, null)));
 }
-
+ 
 // ============================================================
 // Music mode (BandDump) — rate/rank artists, favorite songs, Spin recs.
 // Same header, same session, same visual language as the movie side;
 // its own `banddump` schema and its own set of tabs underneath.
 // ============================================================
-
+ 
 function shimArtistFromRow(row) {
     // Reconstructs a Spotify-search-shaped object from a stored banddump.artists
     // row so ArtistDetailModal / ensureArtistRow can treat it identically to a
@@ -876,7 +975,23 @@ function shimArtistFromRow(row) {
         external_urls: { spotify: row.spotify_url },
     };
 }
-
+ 
+const RATING_OPTIONS = (() => {
+    const opts = [];
+    for (let v = 10; v <= 100; v += 2) opts.push(v / 10);
+    return opts;
+})();
+ 
+function RatingButtons({ value, onChange }) {
+    return (React.createElement("div", { className: "rating-btn-grid" },
+        RATING_OPTIONS.map(v => (React.createElement("button", {
+            type: "button",
+            key: v,
+            className: `rating-btn ${Math.abs(value - v) < 0.05 ? "selected" : ""}`,
+            onClick: () => onChange(v),
+        }, v.toFixed(1))))));
+}
+ 
 function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
     const [artistRow, setArtistRow] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -890,12 +1005,20 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
     const [songResults, setSongResults] = useState([]);
     const [songSearching, setSongSearching] = useState(false);
     const [favSongs, setFavSongs] = useState([]);
-
+    const [queuedSongIds, setQueuedSongIds] = useState([]);
+    const [topSongs, setTopSongs] = useState([]);
+    const [topSongsLoading, setTopSongsLoading] = useState(true);
+    const [bio, setBio] = useState("");
+ 
     async function refreshFavSongs(artistId) {
         const { data } = await bandDumpDb.from("favorite_songs").select("*").eq("artist_id", artistId).eq("user_id", session.user.id).order("added_at", { ascending: false });
         setFavSongs(data || []);
     }
-
+    async function refreshQueuedSongs(artistId) {
+        const { data } = await bandDumpDb.from("queued_songs").select("spotify_track_id").eq("artist_id", artistId).eq("user_id", session.user.id);
+        setQueuedSongIds((data || []).map(s => s.spotify_track_id));
+    }
+ 
     useEffect(() => {
         let cancelled = false;
         (async () => {
@@ -912,6 +1035,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                     setStatus(existingRating.status);
                 }
                 await refreshFavSongs(row.id);
+                await refreshQueuedSongs(row.id);
             } catch (e) {
                 if (!cancelled) setError(e.message || "Couldn't load this artist.");
             } finally {
@@ -921,7 +1045,29 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
         return () => { cancelled = true; };
         // eslint-disable-next-line
     }, [spotifyArtist.id]);
-
+ 
+    // Auto-load top songs + a short "about the band" blurb as soon as we know the name.
+    useEffect(() => {
+        let cancelled = false;
+        setTopSongsLoading(true);
+        setTopSongs([]);
+        setBio("");
+        (async () => {
+            const [songsResult, infoResult] = await Promise.allSettled([
+                spotifyTopSongsFallback(spotifyArtist.name, 10),
+                lastfmArtistInfo(spotifyArtist.name),
+            ]);
+            if (cancelled) return;
+            if (songsResult.status === "fulfilled") setTopSongs(songsResult.value);
+            if (infoResult.status === "fulfilled") {
+                const summary = infoResult.value && infoResult.value.artist && infoResult.value.artist.bio && infoResult.value.artist.bio.summary;
+                if (summary) setBio(stripHtml(summary));
+            }
+            setTopSongsLoading(false);
+        })();
+        return () => { cancelled = true; };
+    }, [spotifyArtist.name]);
+ 
     async function addGenre() {
         const g = newGenre.trim().toLowerCase();
         if (!g || !artistRow) return;
@@ -947,6 +1093,17 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
         setStatus("queued");
         onChanged();
     }
+    async function favoriteNow() {
+        try {
+            await quickFavoriteArtist(spotifyArtist, session.user.id);
+            setStatus("rated");
+            setSaveMsg("Added to your favorite artists");
+            onChanged();
+            setTimeout(() => setSaveMsg(""), 1500);
+        } catch (e) {
+            setError(e.message);
+        }
+    }
     async function searchSongs() {
         setSongSearching(true);
         try {
@@ -959,9 +1116,11 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
             setSongSearching(false);
         }
     }
+    function albumArtOf(track) {
+        return (track.album && track.album.images && track.album.images[0] && track.album.images[0].url) || null;
+    }
     async function addFavSong(track) {
-        const art = (track.album && track.album.images && track.album.images[track.album.images.length - 1] && track.album.images[track.album.images.length - 1].url) || null;
-        const { error: err } = await bandDumpDb.from("favorite_songs").insert({ user_id: session.user.id, artist_id: artistRow.id, spotify_track_id: track.id, track_name: track.name, album_art_url: art });
+        const { error: err } = await bandDumpDb.from("favorite_songs").insert({ user_id: session.user.id, artist_id: artistRow.id, spotify_track_id: track.id, track_name: track.name, album_art_url: albumArtOf(track) });
         if (err && err.code !== "23505") return setError(err.message);
         await refreshFavSongs(artistRow.id);
     }
@@ -969,7 +1128,12 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
         await bandDumpDb.from("favorite_songs").delete().eq("id", id);
         await refreshFavSongs(artistRow.id);
     }
-
+    async function addSongToQueue(track) {
+        const { error: err } = await bandDumpDb.from("queued_songs").insert({ user_id: session.user.id, artist_id: artistRow.id, spotify_track_id: track.id, track_name: track.name, album_art_url: albumArtOf(track) });
+        if (err && err.code !== "23505") return setError(err.message);
+        await refreshQueuedSongs(artistRow.id);
+    }
+ 
     return (React.createElement("div", { className: "modal-overlay", onClick: onClose },
         React.createElement("div", { className: "modal", onClick: e => e.stopPropagation() },
             React.createElement("button", { className: "modal-close-x", onClick: onClose }, "✕"),
@@ -979,7 +1143,9 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                         ? React.createElement("img", { src: artistRow.image_url, alt: "" })
                         : React.createElement("div", { className: "art-fallback" }),
                     React.createElement("div", null,
-                        React.createElement("h3", null, artistRow.name),
+                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+                            React.createElement("h3", null, artistRow.name),
+                            React.createElement("button", { className: `fav-heart-btn ${status === "rated" ? "favorited" : ""}`, onClick: favoriteNow, title: "Add to favorite artists" }, status === "rated" ? "♥" : "♡")),
                         React.createElement("div", { className: "genre-tag-row" },
                             artistRow.genres.map(g => (React.createElement("span", { className: "genre-tag removable", key: g },
                                 g,
@@ -987,18 +1153,31 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                             React.createElement("input", { type: "text", placeholder: "+ genre", value: newGenre, style: { width: 110, padding: "3px 8px", fontSize: 11 }, onChange: e => setNewGenre(e.target.value), onKeyDown: e => { if (e.key === "Enter") addGenre(); } })),
                         artistRow.spotify_url && React.createElement("a", { href: artistRow.spotify_url, target: "_blank", rel: "noopener", style: { fontSize: 12, color: "var(--sage)" } }, "Open in Spotify ↗")),
                 ),
+                bio && React.createElement("p", { className: "artist-bio" }, bio.length > 320 ? bio.slice(0, 320) + "…" : bio),
                 error && React.createElement("div", { style: { color: "var(--danger)", fontSize: 12.5, marginTop: 10 } }, error),
                 React.createElement("label", null, "Rating"),
-                React.createElement("div", { className: "rating-slider-row" },
-                    React.createElement("input", { type: "range", min: "0", max: "10", step: "0.5", value: rating, onChange: e => setRating(parseFloat(e.target.value)) }),
-                    React.createElement("span", { className: "rating-live-value" }, rating.toFixed(1))),
+                React.createElement(RatingButtons, { value: rating, onChange: setRating }),
                 React.createElement("label", null, "Notes"),
                 React.createElement("textarea", { value: notes, onChange: e => setNotes(e.target.value), rows: 2, style: { width: "100%", background: "var(--bg-raised-2)", border: "1px solid var(--divider)", borderRadius: "var(--radius-sm)", color: "var(--text)", padding: 8, fontFamily: "inherit", fontSize: 13 } }),
                 React.createElement("div", { className: "modal-actions" },
                     React.createElement("button", { className: "primary", onClick: saveRating }, status === "rated" ? "Update rating" : "Save rating"),
                     React.createElement("button", { className: "ghost", onClick: addToQueue, disabled: status === "queued" }, status === "queued" ? "In queue" : "Add to queue")),
                 saveMsg && React.createElement("div", { style: { color: "var(--sage)", fontSize: 12, marginTop: 6 } }, saveMsg),
-
+ 
+                React.createElement("label", { style: { marginTop: 22 } }, "Top Songs"),
+                topSongsLoading ? React.createElement("div", { style: { color: "var(--text-faint)", fontSize: 12.5, fontStyle: "italic", marginTop: 6 } }, "Loading…") :
+                    (topSongs.length === 0
+                        ? React.createElement("div", { style: { color: "var(--text-faint)", fontSize: 12.5, fontStyle: "italic", marginTop: 6 } }, "Couldn't find songs for this artist on Spotify.")
+                        : React.createElement("div", { style: { marginTop: 6 } },
+                            topSongs.map(t => (React.createElement("div", { className: "log-row", key: t.id },
+                                albumArtOf(t) ? React.createElement("img", { src: albumArtOf(t), alt: "", style: { width: 40, height: 40 } }) : null,
+                                React.createElement("div", { style: { flex: 1 } },
+                                    React.createElement("div", { className: "log-row-title" }, t.name),
+                                    React.createElement("div", { className: "log-row-meta" }, (t.album && t.album.name) || "")),
+                                React.createElement("div", { className: "music-section-actions" },
+                                    React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, onClick: () => addFavSong(t) }, "+ Like"),
+                                    React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, disabled: queuedSongIds.includes(t.id), onClick: () => addSongToQueue(t) }, queuedSongIds.includes(t.id) ? "Queued" : "+ Queue"))))))),
+ 
                 React.createElement("label", { style: { marginTop: 22 } }, "Favorite Songs"),
                 React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 6 } },
                     React.createElement("input", { type: "text", placeholder: "Search this artist's songs…", value: songQuery, onChange: e => setSongQuery(e.target.value), onKeyDown: e => { if (e.key === "Enter") searchSongs(); } }),
@@ -1017,17 +1196,77 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                             React.createElement("div", { style: { flex: 1 } }, React.createElement("div", { className: "log-row-title" }, s.track_name)),
                             React.createElement("button", { className: "remove-btn", onClick: () => removeFavSong(s.id) }, React.createElement(IconX, { size: 13 })))))))))));
 }
-
-function MusicDiscoverTab({ onOpenArtist }) {
+ 
+function MusicArtistCard({ name, imageUrl, subtitle, onOpen, onFavorite, favorited }) {
+    return (React.createElement("div", { className: "card", onClick: onOpen },
+        React.createElement("div", { className: "poster-wrap" },
+            imageUrl ? React.createElement("img", { src: imageUrl, alt: name }) : React.createElement("div", { style: { width: "100%", aspectRatio: "1", background: "var(--bg-raised-2)" } }),
+            onFavorite && React.createElement("button", {
+                className: `card-fav-heart ${favorited ? "favorited" : ""}`,
+                onClick: e => { e.stopPropagation(); onFavorite(); },
+                title: "Add to favorite artists",
+            }, favorited ? "♥" : "♡")),
+        React.createElement("div", { className: "card-body" },
+            React.createElement("div", { className: "card-title" }, name),
+            React.createElement("div", { className: "card-year" }, subtitle || "—"))));
+}
+ 
+function MusicAutocompleteDropdown({ query, onPick, enabled, closeSignal }) {
+    const debouncedQuery = useDebouncedValue(query, 300);
+    const [suggestions, setSuggestions] = useState([]);
+    const [open, setOpen] = useState(false);
+    useEffect(() => { setOpen(false); }, [closeSignal]);
+    useEffect(() => {
+        if (!enabled) { setOpen(false); return; }
+        if (!debouncedQuery || debouncedQuery.trim().length < 2) { setSuggestions([]); setOpen(false); return; }
+        let cancelled = false;
+        spotifySearchArtists(debouncedQuery.trim(), 10)
+            .then(data => {
+                if (cancelled) return;
+                const list = ((data.artists && data.artists.items) || [])
+                    .slice()
+                    .sort((a, b) => a.name.localeCompare(b.name))
+                    .slice(0, 4);
+                setSuggestions(list);
+                setOpen(list.length > 0);
+            })
+            .catch(() => { if (!cancelled) { setSuggestions([]); setOpen(false); } });
+        return () => { cancelled = true; };
+    }, [debouncedQuery, enabled]);
+    if (!open || suggestions.length === 0) return null;
+    return (React.createElement("div", { className: "autocomplete-dropdown" }, suggestions.map(a => {
+        const img = a.images && a.images.length ? a.images[0].url : null;
+        return React.createElement("div", { key: a.id, className: "autocomplete-item", onMouseDown: e => { e.preventDefault(); onPick(a); } },
+            img ? React.createElement("img", { src: img, alt: "" }) : React.createElement("img", { src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'/%3E", alt: "" }),
+            React.createElement("div", null,
+                React.createElement("div", null, a.name),
+                React.createElement("div", { className: "ac-sub" }, (a.genres || []).slice(0, 2).join(", ") || "—")));
+    })));
+}
+ 
+function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
+    const [browseMode, setBrowseMode] = useState("search"); // "search" | "genre"
     const [query, setQuery] = useState("");
     const [results, setResults] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
+    const [acEnabled, setAcEnabled] = useState(false);
+    const [closeSignal, setCloseSignal] = useState(0);
+    const [favoritedIds, setFavoritedIds] = useState([]);
+ 
+    const [selectedGenre, setSelectedGenre] = useState(null);
+    const [genrePage, setGenrePage] = useState(1);
+    const [genreTotalPages, setGenreTotalPages] = useState(1);
+    const [genreResults, setGenreResults] = useState([]);
+    const [genreLoading, setGenreLoading] = useState(false);
+    const [genreError, setGenreError] = useState("");
+ 
     async function doSearch(e) {
         if (e) e.preventDefault();
         if (!query.trim()) return;
         setLoading(true);
         setError("");
+        setCloseSignal(t => t + 1);
         try {
             const data = await spotifySearchArtists(query.trim(), 10);
             setResults((data.artists && data.artists.items) || []);
@@ -1037,25 +1276,125 @@ function MusicDiscoverTab({ onOpenArtist }) {
             setLoading(false);
         }
     }
+    function openFromAutocomplete(a) {
+        setQuery(a.name);
+        setAcEnabled(false);
+        setCloseSignal(t => t + 1);
+        onOpenArtist(a);
+    }
+    async function favoriteArtist(a) {
+        try {
+            await quickFavoriteArtist(a, session.user.id);
+            setFavoritedIds(prev => [...prev, a.id]);
+            onChanged && onChanged();
+        } catch (e2) { setError(e2.message); }
+    }
+ 
+    useEffect(() => {
+        if (browseMode !== "genre" || !selectedGenre) return;
+        let cancelled = false;
+        setGenreLoading(true);
+        setGenreError("");
+        (async () => {
+            try {
+                const data = await lastfmTopArtistsByTag(selectedGenre, genrePage, 25);
+                if (cancelled) return;
+                const top = data.topartists || {};
+                const list = top.artist || [];
+                const attr = top["@attr"] || {};
+                setGenreTotalPages(attr.totalPages ? parseInt(attr.totalPages, 10) : 1);
+                // Last.fm's own artist images have all been the same generic
+                // placeholder for years (a known API limitation) — resolve real
+                // photos, and a usable Spotify object to open/favorite, from
+                // Spotify instead of trusting Last.fm's picture.
+                const resolved = await Promise.all(list.map(async a => {
+                    try {
+                        const sr = await spotifySearchArtists(a.name, 1);
+                        const spotifyArtist = (sr.artists && sr.artists.items && sr.artists.items[0]) || null;
+                        return { name: a.name, listeners: a.listeners, spotifyArtist };
+                    } catch (e) {
+                        return { name: a.name, listeners: a.listeners, spotifyArtist: null };
+                    }
+                }));
+                if (!cancelled) setGenreResults(resolved);
+            } catch (e2) {
+                if (!cancelled) setGenreError(e2.message || "Couldn't reach Last.fm.");
+            } finally {
+                if (!cancelled) setGenreLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [browseMode, selectedGenre, genrePage]);
+ 
+    async function openGenreArtist(entry) {
+        setGenreError("");
+        if (!entry.spotifyArtist) { setGenreError(`Couldn't find "${entry.name}" on Spotify.`); return; }
+        try {
+            const row = await ensureArtistRow(entry.spotifyArtist);
+            await attachGenreTag(row.id, selectedGenre);
+        } catch (e) { /* non-fatal — still open the artist even if the tag insert failed */ }
+        onOpenArtist(entry.spotifyArtist);
+    }
+    async function favoriteGenreArtist(entry) {
+        setGenreError("");
+        if (!entry.spotifyArtist) { setGenreError(`Couldn't find "${entry.name}" on Spotify.`); return; }
+        try {
+            const row = await quickFavoriteArtist(entry.spotifyArtist, session.user.id);
+            await attachGenreTag(row.id, selectedGenre);
+            setFavoritedIds(prev => [...prev, entry.spotifyArtist.id]);
+            onChanged && onChanged();
+        } catch (e2) { setGenreError(e2.message); }
+    }
+ 
     return (React.createElement("div", null,
-        React.createElement("form", { className: "search-row", onSubmit: doSearch, style: { display: "flex", gap: 8, margin: "14px 0" } },
-            React.createElement("input", { type: "text", placeholder: "Search for an artist…", value: query, onChange: e => setQuery(e.target.value) }),
-            React.createElement("button", { className: "primary", type: "submit", disabled: loading }, loading ? "…" : "Search")),
-        error && React.createElement("div", { style: { color: "var(--danger)", fontSize: 13 } }, error),
-        !loading && results.length === 0 && !error && (React.createElement("div", { className: "empty" },
-            React.createElement("div", { className: "display" }, "Search for an artist to get started"),
-            React.createElement("div", null, "Rate a few and Spin will start recommending songs."))),
-        results.length > 0 && (React.createElement("div", { className: "grid" }, results.map(a => {
-            const img = a.images && a.images.length ? a.images[a.images.length - 1].url : null;
-            return React.createElement("div", { className: "card", key: a.id, onClick: () => onOpenArtist(a) },
-                React.createElement("div", { className: "poster-wrap" },
-                    img ? React.createElement("img", { src: img, alt: a.name }) : React.createElement("div", { style: { width: "100%", aspectRatio: "1", background: "var(--bg-raised-2)" } })),
-                React.createElement("div", { className: "card-body" },
-                    React.createElement("div", { className: "card-title" }, a.name),
-                    React.createElement("div", { className: "card-year" }, (a.genres || []).slice(0, 2).join(", ") || "—")));
-        })))));
+        React.createElement("div", { className: "pill-group", style: { margin: "14px 0" } },
+            React.createElement("button", { className: `pill ${browseMode === "search" ? "selected" : ""}`, onClick: () => setBrowseMode("search") }, "Search"),
+            React.createElement("button", { className: `pill ${browseMode === "genre" ? "selected" : ""}`, onClick: () => setBrowseMode("genre") }, "Browse by genre")),
+ 
+        browseMode === "search" && React.createElement(React.Fragment, null,
+            React.createElement("form", { className: "search-row", onSubmit: doSearch, style: { display: "flex", gap: 8, margin: "14px 0" } },
+                React.createElement("input", { type: "text", placeholder: "Search for an artist…", value: query, onChange: e => { setQuery(e.target.value); setAcEnabled(true); }, onFocus: () => setAcEnabled(true) }),
+                React.createElement("button", { className: "primary", type: "submit", disabled: loading }, loading ? "…" : "Search"),
+                React.createElement(MusicAutocompleteDropdown, { query, enabled: acEnabled, closeSignal, onPick: openFromAutocomplete })),
+            error && React.createElement("div", { style: { color: "var(--danger)", fontSize: 13 } }, error),
+            !loading && results.length === 0 && !error && (React.createElement("div", { className: "empty" },
+                React.createElement("div", { className: "display" }, "Search for an artist to get started"),
+                React.createElement("div", null, "Rate a few and Spin will start recommending songs."))),
+            results.length > 0 && (React.createElement("div", { className: "grid" }, results.map(a => {
+                const img = a.images && a.images.length ? a.images[0].url : null;
+                return React.createElement(MusicArtistCard, {
+                    key: a.id, name: a.name, imageUrl: img, subtitle: (a.genres || []).slice(0, 2).join(", "),
+                    onOpen: () => onOpenArtist(a),
+                    onFavorite: session ? () => favoriteArtist(a) : null,
+                    favorited: favoritedIds.includes(a.id),
+                });
+            })))),
+ 
+        browseMode === "genre" && React.createElement(React.Fragment, null,
+            !selectedGenre ? React.createElement("div", { className: "genre-pick-grid" },
+                MUSIC_GENRES.map(g => React.createElement("button", { key: g, className: "pill", onClick: () => { setSelectedGenre(g); setGenrePage(1); } }, g)))
+                : React.createElement(React.Fragment, null,
+                    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, margin: "14px 0" } },
+                        React.createElement("button", { className: "ghost", onClick: () => { setSelectedGenre(null); setGenreResults([]); } }, "‹ All genres"),
+                        React.createElement("h3", { style: { margin: 0, textTransform: "capitalize" } }, `Top artists — ${selectedGenre}`)),
+                    genreError && React.createElement("div", { style: { color: "var(--danger)", fontSize: 13 } }, genreError),
+                    genreLoading ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…")) :
+                        React.createElement("div", { className: "grid" }, genreResults.map((entry, i) => {
+                            const img = entry.spotifyArtist && entry.spotifyArtist.images && entry.spotifyArtist.images.length ? entry.spotifyArtist.images[0].url : null;
+                            const favId = entry.spotifyArtist && entry.spotifyArtist.id;
+                            return React.createElement(MusicArtistCard, {
+                                key: favId || `${entry.name}-${i}`, name: entry.name, imageUrl: img, subtitle: entry.listeners ? `${Number(entry.listeners).toLocaleString()} listeners` : "",
+                                onOpen: () => openGenreArtist(entry),
+                                onFavorite: session ? () => favoriteGenreArtist(entry) : null,
+                                favorited: favId ? favoritedIds.includes(favId) : false,
+                            });
+                        })),
+                    genreResults.length > 0 && React.createElement("div", { className: "pagination-row" },
+                        React.createElement("button", { className: "ghost", disabled: genrePage <= 1, onClick: () => setGenrePage(p => Math.max(1, p - 1)) }, "‹ Prev"),
+                        React.createElement("span", null, `Page ${genrePage}${genreTotalPages ? ` of ${genreTotalPages}` : ""}`),
+                        React.createElement("button", { className: "ghost", disabled: genreTotalPages ? genrePage >= genreTotalPages : genreResults.length < 25, onClick: () => setGenrePage(p => p + 1) }, "Next ›"))))));
 }
-
+ 
 function useMusicLibrary(session, refreshToken, statusFilter) {
     const [rows, setRows] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -1085,7 +1424,7 @@ function useMusicLibrary(session, refreshToken, statusFilter) {
     }, [session, refreshToken, statusFilter]);
     return { rows, loading };
 }
-
+ 
 function MusicMyArtistsTab({ session, onOpenArtist, refreshToken }) {
     const { rows, loading } = useMusicLibrary(session, refreshToken, "rated");
     const [genreFilter, setGenreFilter] = useState("");
@@ -1110,58 +1449,110 @@ function MusicMyArtistsTab({ session, onOpenArtist, refreshToken }) {
                     React.createElement("div", { className: "log-row-meta" }, (r.artists.genres || []).slice(0, 3).join(", ") || "—")),
                 React.createElement("div", { className: "log-row-rating" }, Number(r.rating).toFixed(1))))))));
 }
-
+ 
+function useSongQueue(session, refreshToken) {
+    const [songs, setSongs] = useState([]);
+    const [loading, setLoading] = useState(true);
+    useEffect(() => {
+        if (!session) return;
+        let cancelled = false;
+        setLoading(true);
+        (async () => {
+            const { data, error } = await bandDumpDb
+                .from("queued_songs")
+                .select("id, spotify_track_id, track_name, album_art_url, added_at, artist_id, artists:artist_id (id, spotify_id, name, image_url, spotify_url)")
+                .eq("user_id", session.user.id)
+                .order("added_at", { ascending: false });
+            if (cancelled) return;
+            setSongs(error ? [] : (data || []));
+            setLoading(false);
+        })();
+        return () => { cancelled = true; };
+    }, [session, refreshToken]);
+    return { songs, loading };
+}
+ 
 function MusicQueueTab({ session, onOpenArtist, refreshToken }) {
     const { rows, loading } = useMusicLibrary(session, refreshToken, "queued");
-    if (loading) return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…"));
-    if (rows.length === 0) return (React.createElement("div", { className: "empty" },
-        React.createElement("div", { className: "display" }, "Queue's empty"),
-        React.createElement("div", null, "Add artists you want to check out from the Discover tab.")));
-    return (React.createElement("div", null, rows.map(r => (React.createElement("div", { className: "log-row", key: r.artist_id, onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } },
-        r.artists.image_url ? React.createElement("img", { src: r.artists.image_url, alt: "" }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
-        React.createElement("div", { style: { flex: 1 } }, React.createElement("div", { className: "log-row-title" }, r.artists.name)),
-        React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 } }, "Rate"))))));
+    const [songRefresh, setSongRefresh] = useState(0);
+    const { songs, loading: songsLoading } = useSongQueue(session, refreshToken + songRefresh);
+    async function removeQueuedSong(id) {
+        await bandDumpDb.from("queued_songs").delete().eq("id", id);
+        setSongRefresh(t => t + 1);
+    }
+    if (loading || songsLoading) return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…"));
+    return (React.createElement("div", null,
+        React.createElement("label", { style: { marginTop: 14, display: "block" } }, "Artists"),
+        rows.length === 0
+            ? React.createElement("div", { className: "empty" },
+                React.createElement("div", { className: "display" }, "No artists queued"),
+                React.createElement("div", null, "Add artists you want to check out from the Discover tab."))
+            : rows.map(r => (React.createElement("div", { className: "log-row", key: r.artist_id, onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } },
+                r.artists.image_url ? React.createElement("img", { src: r.artists.image_url, alt: "" }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                React.createElement("div", { style: { flex: 1 } }, React.createElement("div", { className: "log-row-title" }, r.artists.name)),
+                React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, onClick: e => { e.stopPropagation(); onOpenArtist(shimArtistFromRow(r.artists)); } }, "Rate")))),
+ 
+        React.createElement("label", { style: { marginTop: 22, display: "block" } }, "Songs"),
+        songs.length === 0
+            ? React.createElement("div", { style: { color: "var(--text-faint)", fontSize: 12.5, fontStyle: "italic", marginTop: 6 } }, "No songs queued yet — add some from an artist's Top Songs.")
+            : songs.map(s => (React.createElement("div", { className: "log-row", key: s.id },
+                s.album_art_url ? React.createElement("img", { src: s.album_art_url, alt: "", style: { width: 40, height: 40 } }) : React.createElement("div", { style: { width: 40, height: 40, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                React.createElement("div", { style: { flex: 1, cursor: s.artists ? "pointer" : "default" }, onClick: () => s.artists && onOpenArtist(shimArtistFromRow(s.artists)) },
+                    React.createElement("div", { className: "log-row-title" }, s.track_name),
+                    React.createElement("div", { className: "log-row-meta" }, s.artists ? s.artists.name : "")),
+                React.createElement("button", { className: "remove-btn", onClick: () => removeQueuedSong(s.id) }, React.createElement(IconX, { size: 13 })))))));
 }
-
-function MusicSpinTab({ session, onOpenArtist }) {
-    const { rows } = useMusicLibrary(session, 0, "rated");
+ 
+function MusicSpinTab({ session, onOpenArtist, onChanged }) {
+    const { rows: ratedRows } = useMusicLibrary(session, 0, "rated");
+    const { rows: queuedRows } = useMusicLibrary(session, 0, "queued");
     const [mode, setMode] = useState("overall");
     const [genre, setGenre] = useState("");
     const [results, setResults] = useState([]);
     const [loading, setLoading] = useState(false);
     const [msg, setMsg] = useState("");
+    const [favoritedIds, setFavoritedIds] = useState([]);
     const allGenres = useMemo(() => {
         const s = new Set();
-        rows.forEach(r => (r.artists.genres || []).forEach(g => s.add(g)));
+        [...ratedRows, ...queuedRows].forEach(r => (r.artists.genres || []).forEach(g => s.add(g)));
         return [...s].sort();
-    }, [rows]);
-
+    }, [ratedRows, queuedRows]);
+ 
     async function runSpin() {
         setLoading(true);
         setMsg("");
         setResults([]);
         try {
-            let seeds = rows.filter(r => r.rating != null);
-            if (mode === "genre" && genre) seeds = seeds.filter(r => (r.artists.genres || []).includes(genre));
-            seeds = [...seeds].sort((a, b) => b.rating - a.rating).slice(0, 4);
-            if (seeds.length === 0) { setMsg("Rate a few artists first so Spin has something to work from."); setLoading(false); return; }
-
-            const knownNames = new Set(rows.map(r => r.artists.name.toLowerCase()));
+            // Seeds come from both what you've rated (weighted highest-first) and
+            // what's sitting in your queue — you don't have to rate anything before
+            // Spin has something to work from.
+            let ratedSeeds = ratedRows.filter(r => r.rating != null);
+            let queuedSeeds = queuedRows;
+            if (mode === "genre" && genre) {
+                ratedSeeds = ratedSeeds.filter(r => (r.artists.genres || []).includes(genre));
+                queuedSeeds = queuedSeeds.filter(r => (r.artists.genres || []).includes(genre));
+            }
+            ratedSeeds = [...ratedSeeds].sort((a, b) => b.rating - a.rating).slice(0, 4).map(r => ({ row: r, source: "rated" }));
+            queuedSeeds = queuedSeeds.slice(0, 4).map(r => ({ row: r, source: "queued" }));
+            const seeds = [...ratedSeeds, ...queuedSeeds];
+            if (seeds.length === 0) { setMsg("Rate or queue a few artists first so Spin has something to work from."); setLoading(false); return; }
+ 
+            const knownNames = new Set([...ratedRows, ...queuedRows].map(r => r.artists.name.toLowerCase()));
             const candidates = new Map();
             for (const seed of seeds) {
                 try {
-                    const data = await lastfmSimilarArtists(seed.artists.name, 8);
+                    const data = await lastfmSimilarArtists(seed.row.artists.name, 8);
                     const similar = (data.similarartists && data.similarartists.artist) || [];
                     similar.forEach(s => {
                         const key = s.name.toLowerCase();
                         if (knownNames.has(key) || candidates.has(key)) return;
-                        candidates.set(key, { name: s.name, match: parseFloat(s.match || "0"), fromSeed: seed.artists.name });
+                        candidates.set(key, { name: s.name, match: parseFloat(s.match || "0"), fromSeed: seed.row.artists.name, fromSource: seed.source });
                     });
                 } catch (e) { /* one seed failing shouldn't kill the whole spin */ }
             }
             const ranked = [...candidates.values()].sort((a, b) => b.match - a.match).slice(0, 8);
-            if (ranked.length === 0) { setMsg("Last.fm didn't have similar-artist data for your top picks. Try rating a few more well-known artists."); setLoading(false); return; }
-
+            if (ranked.length === 0) { setMsg("Last.fm didn't have similar-artist data for your picks. Try rating or queueing a few more well-known artists."); setLoading(false); return; }
+ 
             const enriched = [];
             for (const c of ranked) {
                 try {
@@ -1179,12 +1570,20 @@ function MusicSpinTab({ session, onOpenArtist }) {
             setLoading(false);
         }
     }
-
+ 
     async function sendFeedback(track, signal) {
         if (!track) return;
         await bandDumpDb.from("recommendation_feedback").insert({ user_id: session.user.id, spotify_track_id: track.id, signal });
     }
-
+    async function favoriteResult(spotifyArtist) {
+        if (!spotifyArtist) return;
+        try {
+            await quickFavoriteArtist(spotifyArtist, session.user.id);
+            setFavoritedIds(prev => [...prev, spotifyArtist.id]);
+            onChanged && onChanged();
+        } catch (e) { setMsg(e.message); }
+    }
+ 
     return (React.createElement("div", null,
         React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", margin: "14px 0", flexWrap: "wrap" } },
             React.createElement("select", { value: mode, onChange: e => setMode(e.target.value) },
@@ -1194,25 +1593,26 @@ function MusicSpinTab({ session, onOpenArtist }) {
                 React.createElement("option", { value: "" }, "Choose a genre…"),
                 allGenres.map(g => React.createElement("option", { value: g, key: g }, g))),
             React.createElement("button", { className: "primary", onClick: runSpin, disabled: loading }, loading ? "Spinning…" : "Spin")),
-        React.createElement("div", { style: { color: "var(--text-dim)", fontSize: 12, marginBottom: 10 } }, "Built from your ratings and Last.fm's similar-artist graph, not Spotify's own recommendations."),
+        React.createElement("div", { style: { color: "var(--text-dim)", fontSize: 12, marginBottom: 10 } }, "Built from your ratings and queue, plus Last.fm's similar-artist graph — not Spotify's own recommendations."),
         msg && React.createElement("div", { className: "empty" }, React.createElement("div", null, msg)),
         results.map((r, i) => (React.createElement("div", { className: "log-row", key: i },
             r.spotifyArtist && r.spotifyArtist.images && r.spotifyArtist.images.length
-                ? React.createElement("img", { src: r.spotifyArtist.images[r.spotifyArtist.images.length - 1].url, alt: "", style: { cursor: r.spotifyArtist ? "pointer" : "default" }, onClick: () => r.spotifyArtist && onOpenArtist(r.spotifyArtist) })
+                ? React.createElement("img", { src: r.spotifyArtist.images[0].url, alt: "", style: { cursor: r.spotifyArtist ? "pointer" : "default" }, onClick: () => r.spotifyArtist && onOpenArtist(r.spotifyArtist) })
                 : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
             React.createElement("div", { style: { flex: 1, cursor: r.spotifyArtist ? "pointer" : "default" }, onClick: () => r.spotifyArtist && onOpenArtist(r.spotifyArtist) },
                 React.createElement("div", { className: "log-row-title" }, r.name),
-                React.createElement("div", { className: "log-row-meta" }, `because you rated ${r.fromSeed} highly${r.track ? ` · try "${r.track.name}"` : ""}`)),
+                React.createElement("div", { className: "log-row-meta" }, `because you ${r.fromSource === "queued" ? "queued" : "rated"} ${r.fromSeed}${r.fromSource === "queued" ? "" : " highly"}${r.track ? ` · try "${r.track.name}"` : ""}`)),
+            r.spotifyArtist && React.createElement("button", { className: `fav-heart-btn ${favoritedIds.includes(r.spotifyArtist.id) ? "favorited" : ""}`, onClick: () => favoriteResult(r.spotifyArtist), title: "Add to favorite artists" }, favoritedIds.includes(r.spotifyArtist.id) ? "♥" : "♡"),
             r.track && r.track.external_urls && React.createElement("a", { href: r.track.external_urls.spotify, target: "_blank", rel: "noopener", className: "remove-btn", title: "Open in Spotify" }, "↗"),
             React.createElement("button", { className: "remove-btn", onClick: () => sendFeedback(r.track, "up"), title: "More like this" }, "👍"),
             React.createElement("button", { className: "remove-btn", onClick: () => sendFeedback(r.track, "down"), title: "Not for me" }, "👎"))))));
 }
-
+ 
 function MusicApp({ session, onRequireLogin }) {
     const [musicTab, setMusicTab] = useState("discover");
     const [openArtist, setOpenArtist] = useState(null);
     const [refreshToken, setRefreshToken] = useState(0);
-
+ 
     if (!bandDumpDb) {
         return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Music mode needs Supabase, which didn't load."));
     }
@@ -1228,13 +1628,13 @@ function MusicApp({ session, onRequireLogin }) {
             React.createElement("button", { className: `tab ${musicTab === "my-artists" ? "active" : ""}`, onClick: () => setMusicTab("my-artists") }, "My Artists"),
             React.createElement("button", { className: `tab ${musicTab === "queue" ? "active" : ""}`, onClick: () => setMusicTab("queue") }, "Queue"),
             React.createElement("button", { className: `tab ${musicTab === "spin" ? "active" : ""}`, onClick: () => setMusicTab("spin") }, "Spin")),
-        musicTab === "discover" && React.createElement(MusicDiscoverTab, { onOpenArtist: setOpenArtist }),
+        musicTab === "discover" && React.createElement(MusicDiscoverTab, { onOpenArtist: setOpenArtist, session, onChanged: () => setRefreshToken(t => t + 1) }),
         musicTab === "my-artists" && React.createElement(MusicMyArtistsTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
         musicTab === "queue" && React.createElement(MusicQueueTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
-        musicTab === "spin" && React.createElement(MusicSpinTab, { session, onOpenArtist: setOpenArtist }),
+        musicTab === "spin" && React.createElement(MusicSpinTab, { session, onOpenArtist: setOpenArtist, onChanged: () => setRefreshToken(t => t + 1) }),
         openArtist && React.createElement(ArtistDetailModal, { spotifyArtist: openArtist, session, onClose: () => setOpenArtist(null), onChanged: () => setRefreshToken(t => t + 1) })));
 }
-
+ 
 function App() {
     const [state, setState] = useState(loadState());
     const [tab, setTab] = useState("search");
@@ -1425,9 +1825,7 @@ function RatingModal({ movie, onSave, onClose, initial }) {
             React.createElement("h3", { className: "display" }, movie.title),
             React.createElement("div", { className: "modal-sub" }, (movie.release_date || "").slice(0, 4)),
             React.createElement("label", null, "Your rating"),
-            React.createElement("div", { className: "rating-input-row" },
-                React.createElement("input", { type: "range", min: "0", max: "10", step: "0.1", value: rating, onChange: e => setRating(parseFloat(e.target.value)) }),
-                React.createElement("div", { className: "rating-display" }, rating.toFixed(1))),
+            React.createElement(RatingButtons, { value: rating, onChange: setRating }),
             React.createElement("div", { className: "modal-actions" },
                 React.createElement("button", { className: "primary", style: { width: "100%" }, onClick: () => { onSave(movie, rating); onClose(); } }, "Save rating")))));
 }
@@ -2434,3 +2832,4 @@ ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(
 </script>
 </body>
 </html>
+
