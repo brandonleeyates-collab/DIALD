@@ -573,6 +573,27 @@
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--divider); border-radius: 5px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--divider-soft); }
+
+  /* --- Mode switch (Movies / Music) --- */
+  .mode-switch { display: inline-flex; gap: 2px; background: var(--bg-raised); border: 1px solid var(--divider); border-radius: var(--radius-pill); padding: 3px; margin-bottom: 10px; }
+  .mode-switch button { border: none; background: transparent; color: var(--text-dim); font-size: 12.5px; font-weight: 700; padding: 6px 14px; border-radius: var(--radius-pill); cursor: pointer; transition: background var(--fast) var(--ease), color var(--fast) var(--ease); }
+  .mode-switch button.active { background: var(--accent); color: #1a1209; }
+  .mode-switch button:not(.active):hover { color: var(--text); }
+
+  /* --- Music mode: genre tags --- */
+  .genre-tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .genre-tag { background: var(--bg-raised-2); border: 1px solid var(--divider); color: var(--olive); font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: var(--radius-pill); }
+  .genre-tag.removable { padding-right: 6px; display: inline-flex; align-items: center; gap: 5px; }
+  .genre-tag.removable button { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
+  .genre-tag.removable button:hover { color: var(--danger); }
+
+  /* --- Music mode: artist hero in detail modal --- */
+  .artist-hero { display: flex; gap: 16px; align-items: flex-start; margin-bottom: 4px; }
+  .artist-hero img, .artist-hero .art-fallback { width: 88px; height: 88px; border-radius: var(--radius-md); object-fit: cover; background: var(--bg-raised-2); flex-shrink: 0; }
+  .artist-hero h3 { margin-bottom: 2px; }
+
+  .rating-slider-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .rating-slider-row .rating-live-value { font-weight: 800; color: var(--accent); min-width: 2.6em; text-align: right; font-variant-numeric: tabular-nums; }
 </style>
 </head>
 <body>
@@ -592,6 +613,48 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const supabaseClient = (window.supabase && window.supabase.createClient)
     ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
     : null;
+
+// ---------- BandDump (Music mode) ----------
+// Shares this same Supabase project/auth as the movie side, just its own
+// `banddump` schema, so one login covers both modes. Spotify/Last.fm go
+// through Edge Functions (spotify-proxy, lastfm-proxy) so their credentials
+// never ship to the browser.
+const bandDumpDb = supabaseClient ? supabaseClient.schema("banddump") : null;
+let bandDumpAccessToken = null; // kept in sync with the movie-side session, see App()
+function setBandDumpToken(session) { bandDumpAccessToken = (session && session.access_token) || null; }
+
+async function bandDumpCallFn(name, params) {
+    const token = bandDumpAccessToken || SUPABASE_ANON_KEY;
+    const qs = new URLSearchParams(params).toString();
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/${name}?${qs}`, {
+        headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY },
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `${name} failed (${res.status})`);
+    return data;
+}
+const spotifySearchArtists = (q, limit = 10) => bandDumpCallFn("spotify-proxy", { action: "search", type: "artist", q, limit });
+const spotifySearchTracks = (q, limit = 10) => bandDumpCallFn("spotify-proxy", { action: "search", type: "track", q, limit });
+const lastfmSimilarArtists = (artist, limit = 10) => bandDumpCallFn("lastfm-proxy", { action: "similar-artists", artist, limit });
+
+async function ensureArtistRow(spotifyArtist) {
+    const { data: existing } = await bandDumpDb.from("artists").select("*").eq("spotify_id", spotifyArtist.id).maybeSingle();
+    if (existing) return existing;
+    const img = (spotifyArtist.images && spotifyArtist.images[0] && spotifyArtist.images[0].url) || null;
+    const { data: inserted, error } = await bandDumpDb.from("artists").insert({
+        spotify_id: spotifyArtist.id,
+        name: spotifyArtist.name,
+        image_url: img,
+        spotify_url: (spotifyArtist.external_urls && spotifyArtist.external_urls.spotify) || null,
+    }).select().single();
+    if (error) throw error;
+    const genres = spotifyArtist.genres || [];
+    if (genres.length) {
+        await bandDumpDb.from("artist_genres").insert(genres.map(g => ({ artist_id: inserted.id, genre: g })));
+    }
+    return inserted;
+}
+
 const ALL_SERVICES = ["Netflix", "Prime Video", "Max", "Hulu", "Disney Plus", "Apple TV Plus", "Peacock", "Paramount Plus", "Tubi", "Pluto TV", "Starz", "Showtime", "Sling TV"];
 const PROVIDER_IDS = {
     "Netflix": 8,
@@ -794,6 +857,384 @@ function ScrollToTop() {
     return (React.createElement("button", { className: "scroll-top-btn", onClick: () => window.scrollTo({ top: 0, behavior: "smooth" }), title: "Back to top" },
         React.createElement(IconArrowUp, null)));
 }
+
+// ============================================================
+// Music mode (BandDump) — rate/rank artists, favorite songs, Spin recs.
+// Same header, same session, same visual language as the movie side;
+// its own `banddump` schema and its own set of tabs underneath.
+// ============================================================
+
+function shimArtistFromRow(row) {
+    // Reconstructs a Spotify-search-shaped object from a stored banddump.artists
+    // row so ArtistDetailModal / ensureArtistRow can treat it identically to a
+    // freshly searched result (ensureArtistRow finds it by spotify_id, no dupe).
+    return {
+        id: row.spotify_id,
+        name: row.name,
+        images: row.image_url ? [{ url: row.image_url }] : [],
+        genres: row.genres || [],
+        external_urls: { spotify: row.spotify_url },
+    };
+}
+
+function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
+    const [artistRow, setArtistRow] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
+    const [rating, setRating] = useState(7.0);
+    const [notes, setNotes] = useState("");
+    const [status, setStatus] = useState(null);
+    const [saveMsg, setSaveMsg] = useState("");
+    const [newGenre, setNewGenre] = useState("");
+    const [songQuery, setSongQuery] = useState("");
+    const [songResults, setSongResults] = useState([]);
+    const [songSearching, setSongSearching] = useState(false);
+    const [favSongs, setFavSongs] = useState([]);
+
+    async function refreshFavSongs(artistId) {
+        const { data } = await bandDumpDb.from("favorite_songs").select("*").eq("artist_id", artistId).eq("user_id", session.user.id).order("added_at", { ascending: false });
+        setFavSongs(data || []);
+    }
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const row = await ensureArtistRow(spotifyArtist);
+                const { data: genreRows } = await bandDumpDb.from("artist_genres").select("genre").eq("artist_id", row.id);
+                row.genres = (genreRows || []).map(g => g.genre);
+                const { data: existingRating } = await bandDumpDb.from("user_artist_ratings").select("*").eq("artist_id", row.id).eq("user_id", session.user.id).maybeSingle();
+                if (cancelled) return;
+                setArtistRow(row);
+                if (existingRating) {
+                    setRating(existingRating.rating != null ? Number(existingRating.rating) : 7.0);
+                    setNotes(existingRating.notes || "");
+                    setStatus(existingRating.status);
+                }
+                await refreshFavSongs(row.id);
+            } catch (e) {
+                if (!cancelled) setError(e.message || "Couldn't load this artist.");
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+        // eslint-disable-next-line
+    }, [spotifyArtist.id]);
+
+    async function addGenre() {
+        const g = newGenre.trim().toLowerCase();
+        if (!g || !artistRow) return;
+        await bandDumpDb.from("artist_genres").insert({ artist_id: artistRow.id, genre: g });
+        setArtistRow(prev => ({ ...prev, genres: prev.genres.includes(g) ? prev.genres : [...prev.genres, g] }));
+        setNewGenre("");
+    }
+    async function removeGenre(g) {
+        await bandDumpDb.from("artist_genres").delete().eq("artist_id", artistRow.id).eq("genre", g);
+        setArtistRow(prev => ({ ...prev, genres: prev.genres.filter(x => x !== g) }));
+    }
+    async function saveRating() {
+        const { error: err } = await bandDumpDb.from("user_artist_ratings").upsert({ user_id: session.user.id, artist_id: artistRow.id, rating, notes, status: "rated", rated_at: new Date().toISOString() });
+        if (err) return setError(err.message);
+        setStatus("rated");
+        setSaveMsg("Saved");
+        onChanged();
+        setTimeout(() => setSaveMsg(""), 1500);
+    }
+    async function addToQueue() {
+        const { error: err } = await bandDumpDb.from("user_artist_ratings").upsert({ user_id: session.user.id, artist_id: artistRow.id, status: "queued", rated_at: new Date().toISOString() });
+        if (err) return setError(err.message);
+        setStatus("queued");
+        onChanged();
+    }
+    async function searchSongs() {
+        setSongSearching(true);
+        try {
+            const q = songQuery.trim() ? `track:${songQuery} artist:${artistRow.name}` : `artist:${artistRow.name}`;
+            const data = await spotifySearchTracks(q, 10);
+            setSongResults((data.tracks && data.tracks.items) || []);
+        } catch (e) {
+            setError(e.message);
+        } finally {
+            setSongSearching(false);
+        }
+    }
+    async function addFavSong(track) {
+        const art = (track.album && track.album.images && track.album.images[track.album.images.length - 1] && track.album.images[track.album.images.length - 1].url) || null;
+        const { error: err } = await bandDumpDb.from("favorite_songs").insert({ user_id: session.user.id, artist_id: artistRow.id, spotify_track_id: track.id, track_name: track.name, album_art_url: art });
+        if (err && err.code !== "23505") return setError(err.message);
+        await refreshFavSongs(artistRow.id);
+    }
+    async function removeFavSong(id) {
+        await bandDumpDb.from("favorite_songs").delete().eq("id", id);
+        await refreshFavSongs(artistRow.id);
+    }
+
+    return (React.createElement("div", { className: "modal-overlay", onClick: onClose },
+        React.createElement("div", { className: "modal", onClick: e => e.stopPropagation() },
+            React.createElement("button", { className: "modal-close-x", onClick: onClose }, "✕"),
+            loading ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…")) : (React.createElement(React.Fragment, null,
+                React.createElement("div", { className: "artist-hero" },
+                    artistRow.image_url
+                        ? React.createElement("img", { src: artistRow.image_url, alt: "" })
+                        : React.createElement("div", { className: "art-fallback" }),
+                    React.createElement("div", null,
+                        React.createElement("h3", null, artistRow.name),
+                        React.createElement("div", { className: "genre-tag-row" },
+                            artistRow.genres.map(g => (React.createElement("span", { className: "genre-tag removable", key: g },
+                                g,
+                                React.createElement("button", { onClick: () => removeGenre(g), title: "Remove tag" }, "✕")))),
+                            React.createElement("input", { type: "text", placeholder: "+ genre", value: newGenre, style: { width: 110, padding: "3px 8px", fontSize: 11 }, onChange: e => setNewGenre(e.target.value), onKeyDown: e => { if (e.key === "Enter") addGenre(); } })),
+                        artistRow.spotify_url && React.createElement("a", { href: artistRow.spotify_url, target: "_blank", rel: "noopener", style: { fontSize: 12, color: "var(--sage)" } }, "Open in Spotify ↗")),
+                ),
+                error && React.createElement("div", { style: { color: "var(--danger)", fontSize: 12.5, marginTop: 10 } }, error),
+                React.createElement("label", null, "Rating"),
+                React.createElement("div", { className: "rating-slider-row" },
+                    React.createElement("input", { type: "range", min: "0", max: "10", step: "0.5", value: rating, onChange: e => setRating(parseFloat(e.target.value)) }),
+                    React.createElement("span", { className: "rating-live-value" }, rating.toFixed(1))),
+                React.createElement("label", null, "Notes"),
+                React.createElement("textarea", { value: notes, onChange: e => setNotes(e.target.value), rows: 2, style: { width: "100%", background: "var(--bg-raised-2)", border: "1px solid var(--divider)", borderRadius: "var(--radius-sm)", color: "var(--text)", padding: 8, fontFamily: "inherit", fontSize: 13 } }),
+                React.createElement("div", { className: "modal-actions" },
+                    React.createElement("button", { className: "primary", onClick: saveRating }, status === "rated" ? "Update rating" : "Save rating"),
+                    React.createElement("button", { className: "ghost", onClick: addToQueue, disabled: status === "queued" }, status === "queued" ? "In queue" : "Add to queue")),
+                saveMsg && React.createElement("div", { style: { color: "var(--sage)", fontSize: 12, marginTop: 6 } }, saveMsg),
+
+                React.createElement("label", { style: { marginTop: 22 } }, "Favorite Songs"),
+                React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 6 } },
+                    React.createElement("input", { type: "text", placeholder: "Search this artist's songs…", value: songQuery, onChange: e => setSongQuery(e.target.value), onKeyDown: e => { if (e.key === "Enter") searchSongs(); } }),
+                    React.createElement("button", { className: "ghost", onClick: searchSongs, disabled: songSearching }, songSearching ? "…" : "Search")),
+                songResults.length > 0 && React.createElement("div", { style: { marginTop: 8 } },
+                    songResults.map(t => (React.createElement("div", { className: "log-row", key: t.id },
+                        React.createElement("div", { style: { flex: 1 } },
+                            React.createElement("div", { className: "log-row-title" }, t.name),
+                            React.createElement("div", { className: "log-row-meta" }, (t.album && t.album.name) || "")),
+                        React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, onClick: () => addFavSong(t) }, "+ Add"))))),
+                React.createElement("div", { style: { marginTop: 10 } },
+                    favSongs.length === 0
+                        ? React.createElement("div", { style: { color: "var(--text-faint)", fontSize: 12.5, fontStyle: "italic" } }, "No favorite songs yet.")
+                        : favSongs.map(s => (React.createElement("div", { className: "log-row", key: s.id },
+                            s.album_art_url ? React.createElement("img", { src: s.album_art_url, alt: "", style: { width: 40, height: 40 } }) : null,
+                            React.createElement("div", { style: { flex: 1 } }, React.createElement("div", { className: "log-row-title" }, s.track_name)),
+                            React.createElement("button", { className: "remove-btn", onClick: () => removeFavSong(s.id) }, React.createElement(IconX, { size: 13 })))))))))));
+}
+
+function MusicDiscoverTab({ onOpenArtist }) {
+    const [query, setQuery] = useState("");
+    const [results, setResults] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
+    async function doSearch(e) {
+        if (e) e.preventDefault();
+        if (!query.trim()) return;
+        setLoading(true);
+        setError("");
+        try {
+            const data = await spotifySearchArtists(query.trim(), 10);
+            setResults((data.artists && data.artists.items) || []);
+        } catch (e2) {
+            setError(e2.message || "Couldn't reach Spotify.");
+        } finally {
+            setLoading(false);
+        }
+    }
+    return (React.createElement("div", null,
+        React.createElement("form", { className: "search-row", onSubmit: doSearch, style: { display: "flex", gap: 8, margin: "14px 0" } },
+            React.createElement("input", { type: "text", placeholder: "Search for an artist…", value: query, onChange: e => setQuery(e.target.value) }),
+            React.createElement("button", { className: "primary", type: "submit", disabled: loading }, loading ? "…" : "Search")),
+        error && React.createElement("div", { style: { color: "var(--danger)", fontSize: 13 } }, error),
+        !loading && results.length === 0 && !error && (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Search for an artist to get started"),
+            React.createElement("div", null, "Rate a few and Spin will start recommending songs."))),
+        results.length > 0 && (React.createElement("div", { className: "grid" }, results.map(a => {
+            const img = a.images && a.images.length ? a.images[a.images.length - 1].url : null;
+            return React.createElement("div", { className: "card", key: a.id, onClick: () => onOpenArtist(a) },
+                React.createElement("div", { className: "poster-wrap" },
+                    img ? React.createElement("img", { src: img, alt: a.name }) : React.createElement("div", { style: { width: "100%", aspectRatio: "1", background: "var(--bg-raised-2)" } })),
+                React.createElement("div", { className: "card-body" },
+                    React.createElement("div", { className: "card-title" }, a.name),
+                    React.createElement("div", { className: "card-year" }, (a.genres || []).slice(0, 2).join(", ") || "—")));
+        })))));
+}
+
+function useMusicLibrary(session, refreshToken, statusFilter) {
+    const [rows, setRows] = useState([]);
+    const [loading, setLoading] = useState(true);
+    useEffect(() => {
+        if (!session) return;
+        let cancelled = false;
+        setLoading(true);
+        (async () => {
+            const { data, error } = await bandDumpDb
+                .from("user_artist_ratings")
+                .select("artist_id, rating, notes, status, rated_at, artists:artist_id (id, spotify_id, name, image_url, spotify_url)")
+                .eq("user_id", session.user.id)
+                .eq("status", statusFilter)
+                .order("rating", { ascending: false, nullsFirst: false });
+            if (cancelled) return;
+            if (error) { setRows([]); setLoading(false); return; }
+            const artistIds = data.map(r => r.artist_id);
+            let genreMap = {};
+            if (artistIds.length) {
+                const { data: genreRows } = await bandDumpDb.from("artist_genres").select("artist_id, genre").in("artist_id", artistIds);
+                (genreRows || []).forEach(g => { (genreMap[g.artist_id] = genreMap[g.artist_id] || []).push(g.genre); });
+            }
+            const merged = data.filter(r => r.artists).map(r => ({ ...r, artists: { ...r.artists, genres: genreMap[r.artist_id] || [] } }));
+            if (!cancelled) { setRows(merged); setLoading(false); }
+        })();
+        return () => { cancelled = true; };
+    }, [session, refreshToken, statusFilter]);
+    return { rows, loading };
+}
+
+function MusicMyArtistsTab({ session, onOpenArtist, refreshToken }) {
+    const { rows, loading } = useMusicLibrary(session, refreshToken, "rated");
+    const [genreFilter, setGenreFilter] = useState("");
+    const allGenres = useMemo(() => {
+        const s = new Set();
+        rows.forEach(r => (r.artists.genres || []).forEach(g => s.add(g)));
+        return [...s].sort();
+    }, [rows]);
+    const filtered = genreFilter ? rows.filter(r => (r.artists.genres || []).includes(genreFilter)) : rows;
+    if (loading) return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…"));
+    return (React.createElement("div", null,
+        allGenres.length > 0 && (React.createElement("div", { className: "pill-group", style: { margin: "14px 0" } },
+            React.createElement("button", { className: `pill ${!genreFilter ? "selected" : ""}`, onClick: () => setGenreFilter("") }, "All"),
+            allGenres.map(g => React.createElement("button", { className: `pill ${genreFilter === g ? "selected" : ""}`, key: g, onClick: () => setGenreFilter(g) }, g)))),
+        filtered.length === 0 ? (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "No rated artists yet"),
+            React.createElement("div", null, "Rate artists from the Discover tab and they'll show up here."))) : (
+            filtered.map(r => (React.createElement("div", { className: "log-row", key: r.artist_id, onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } },
+                r.artists.image_url ? React.createElement("img", { src: r.artists.image_url, alt: "" }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                React.createElement("div", { style: { flex: 1 } },
+                    React.createElement("div", { className: "log-row-title" }, r.artists.name),
+                    React.createElement("div", { className: "log-row-meta" }, (r.artists.genres || []).slice(0, 3).join(", ") || "—")),
+                React.createElement("div", { className: "log-row-rating" }, Number(r.rating).toFixed(1))))))));
+}
+
+function MusicQueueTab({ session, onOpenArtist, refreshToken }) {
+    const { rows, loading } = useMusicLibrary(session, refreshToken, "queued");
+    if (loading) return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…"));
+    if (rows.length === 0) return (React.createElement("div", { className: "empty" },
+        React.createElement("div", { className: "display" }, "Queue's empty"),
+        React.createElement("div", null, "Add artists you want to check out from the Discover tab.")));
+    return (React.createElement("div", null, rows.map(r => (React.createElement("div", { className: "log-row", key: r.artist_id, onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } },
+        r.artists.image_url ? React.createElement("img", { src: r.artists.image_url, alt: "" }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+        React.createElement("div", { style: { flex: 1 } }, React.createElement("div", { className: "log-row-title" }, r.artists.name)),
+        React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 } }, "Rate"))))));
+}
+
+function MusicSpinTab({ session, onOpenArtist }) {
+    const { rows } = useMusicLibrary(session, 0, "rated");
+    const [mode, setMode] = useState("overall");
+    const [genre, setGenre] = useState("");
+    const [results, setResults] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const [msg, setMsg] = useState("");
+    const allGenres = useMemo(() => {
+        const s = new Set();
+        rows.forEach(r => (r.artists.genres || []).forEach(g => s.add(g)));
+        return [...s].sort();
+    }, [rows]);
+
+    async function runSpin() {
+        setLoading(true);
+        setMsg("");
+        setResults([]);
+        try {
+            let seeds = rows.filter(r => r.rating != null);
+            if (mode === "genre" && genre) seeds = seeds.filter(r => (r.artists.genres || []).includes(genre));
+            seeds = [...seeds].sort((a, b) => b.rating - a.rating).slice(0, 4);
+            if (seeds.length === 0) { setMsg("Rate a few artists first so Spin has something to work from."); setLoading(false); return; }
+
+            const knownNames = new Set(rows.map(r => r.artists.name.toLowerCase()));
+            const candidates = new Map();
+            for (const seed of seeds) {
+                try {
+                    const data = await lastfmSimilarArtists(seed.artists.name, 8);
+                    const similar = (data.similarartists && data.similarartists.artist) || [];
+                    similar.forEach(s => {
+                        const key = s.name.toLowerCase();
+                        if (knownNames.has(key) || candidates.has(key)) return;
+                        candidates.set(key, { name: s.name, match: parseFloat(s.match || "0"), fromSeed: seed.artists.name });
+                    });
+                } catch (e) { /* one seed failing shouldn't kill the whole spin */ }
+            }
+            const ranked = [...candidates.values()].sort((a, b) => b.match - a.match).slice(0, 8);
+            if (ranked.length === 0) { setMsg("Last.fm didn't have similar-artist data for your top picks. Try rating a few more well-known artists."); setLoading(false); return; }
+
+            const enriched = [];
+            for (const c of ranked) {
+                try {
+                    const artistData = await spotifySearchArtists(c.name, 1);
+                    const spotifyArtist = artistData.artists && artistData.artists.items && artistData.artists.items[0];
+                    const trackData = await spotifySearchTracks(`artist:${c.name}`, 1);
+                    const track = trackData.tracks && trackData.tracks.items && trackData.tracks.items[0];
+                    enriched.push({ ...c, spotifyArtist, track });
+                } catch (e) { /* skip candidates Spotify can't resolve */ }
+            }
+            setResults(enriched);
+        } catch (e) {
+            setMsg(e.message || "Something went wrong.");
+        } finally {
+            setLoading(false);
+        }
+    }
+
+    async function sendFeedback(track, signal) {
+        if (!track) return;
+        await bandDumpDb.from("recommendation_feedback").insert({ user_id: session.user.id, spotify_track_id: track.id, signal });
+    }
+
+    return (React.createElement("div", null,
+        React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", margin: "14px 0", flexWrap: "wrap" } },
+            React.createElement("select", { value: mode, onChange: e => setMode(e.target.value) },
+                React.createElement("option", { value: "overall" }, "Overall"),
+                React.createElement("option", { value: "genre" }, "By genre")),
+            mode === "genre" && React.createElement("select", { value: genre, onChange: e => setGenre(e.target.value) },
+                React.createElement("option", { value: "" }, "Choose a genre…"),
+                allGenres.map(g => React.createElement("option", { value: g, key: g }, g))),
+            React.createElement("button", { className: "primary", onClick: runSpin, disabled: loading }, loading ? "Spinning…" : "Spin")),
+        React.createElement("div", { style: { color: "var(--text-dim)", fontSize: 12, marginBottom: 10 } }, "Built from your ratings and Last.fm's similar-artist graph, not Spotify's own recommendations."),
+        msg && React.createElement("div", { className: "empty" }, React.createElement("div", null, msg)),
+        results.map((r, i) => (React.createElement("div", { className: "log-row", key: i },
+            r.spotifyArtist && r.spotifyArtist.images && r.spotifyArtist.images.length
+                ? React.createElement("img", { src: r.spotifyArtist.images[r.spotifyArtist.images.length - 1].url, alt: "", style: { cursor: r.spotifyArtist ? "pointer" : "default" }, onClick: () => r.spotifyArtist && onOpenArtist(r.spotifyArtist) })
+                : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+            React.createElement("div", { style: { flex: 1, cursor: r.spotifyArtist ? "pointer" : "default" }, onClick: () => r.spotifyArtist && onOpenArtist(r.spotifyArtist) },
+                React.createElement("div", { className: "log-row-title" }, r.name),
+                React.createElement("div", { className: "log-row-meta" }, `because you rated ${r.fromSeed} highly${r.track ? ` · try "${r.track.name}"` : ""}`)),
+            r.track && r.track.external_urls && React.createElement("a", { href: r.track.external_urls.spotify, target: "_blank", rel: "noopener", className: "remove-btn", title: "Open in Spotify" }, "↗"),
+            React.createElement("button", { className: "remove-btn", onClick: () => sendFeedback(r.track, "up"), title: "More like this" }, "👍"),
+            React.createElement("button", { className: "remove-btn", onClick: () => sendFeedback(r.track, "down"), title: "Not for me" }, "👎"))))));
+}
+
+function MusicApp({ session, onRequireLogin }) {
+    const [musicTab, setMusicTab] = useState("discover");
+    const [openArtist, setOpenArtist] = useState(null);
+    const [refreshToken, setRefreshToken] = useState(0);
+
+    if (!bandDumpDb) {
+        return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Music mode needs Supabase, which didn't load."));
+    }
+    if (!session) {
+        return (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Log in to use Music"),
+            React.createElement("div", { style: { marginBottom: 16 } }, "Ratings, favorite songs and recommendations sync to your account — same login as the movie side."),
+            React.createElement("button", { className: "primary", onClick: onRequireLogin }, "Log in to sync")));
+    }
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "tabs" },
+            React.createElement("button", { className: `tab ${musicTab === "discover" ? "active" : ""}`, onClick: () => setMusicTab("discover") }, "Discover"),
+            React.createElement("button", { className: `tab ${musicTab === "my-artists" ? "active" : ""}`, onClick: () => setMusicTab("my-artists") }, "My Artists"),
+            React.createElement("button", { className: `tab ${musicTab === "queue" ? "active" : ""}`, onClick: () => setMusicTab("queue") }, "Queue"),
+            React.createElement("button", { className: `tab ${musicTab === "spin" ? "active" : ""}`, onClick: () => setMusicTab("spin") }, "Spin")),
+        musicTab === "discover" && React.createElement(MusicDiscoverTab, { onOpenArtist: setOpenArtist }),
+        musicTab === "my-artists" && React.createElement(MusicMyArtistsTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
+        musicTab === "queue" && React.createElement(MusicQueueTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
+        musicTab === "spin" && React.createElement(MusicSpinTab, { session, onOpenArtist: setOpenArtist }),
+        openArtist && React.createElement(ArtistDetailModal, { spotifyArtist: openArtist, session, onClose: () => setOpenArtist(null), onChanged: () => setRefreshToken(t => t + 1) })));
+}
+
 function App() {
     const [state, setState] = useState(loadState());
     const [tab, setTab] = useState("search");
@@ -801,14 +1242,25 @@ function App() {
     const [session, setSession] = useState(undefined); // undefined = checking, null = logged out
     const [showAuthModal, setShowAuthModal] = useState(false);
     const [syncing, setSyncing] = useState(false);
+    const [appMode, setAppMode] = useState(() => {
+        try { return localStorage.getItem("diald_mode_v1") || "movies"; } catch (e) { return "movies"; }
+    });
+    useEffect(() => {
+        try { localStorage.setItem("diald_mode_v1", appMode); } catch (e) { }
+    }, [appMode]);
     useEffect(() => {
         if (!supabaseClient) {
             setSession(null);
             return;
         }
-        supabaseClient.auth.getSession().then(({ data }) => setSession(data.session || null));
+        supabaseClient.auth.getSession().then(({ data }) => {
+            const s = data.session || null;
+            setSession(s);
+            setBandDumpToken(s);
+        });
         const { data: listener } = supabaseClient.auth.onAuthStateChange((_event, newSession) => {
             setSession(newSession);
+            setBandDumpToken(newSession);
         });
         return () => { if (listener && listener.subscription)
             listener.subscription.unsubscribe(); };
@@ -936,10 +1388,13 @@ function App() {
                     "DIAL",
                     React.createElement("span", { className: "logo-d" }, "D")),
                 React.createElement("div", { className: "tagline" },
-                    React.createElement("span", { className: "tagline-your" }, "Your taste."),
-                    React.createElement("span", { className: "tagline-diald" }, "Diald in."))),
+                    React.createElement("span", { className: "tagline-your" }, appMode === "music" ? "Your ear." : "Your taste."),
+                    React.createElement("span", { className: "tagline-diald" }, "Diald in.")),
+                React.createElement("div", { className: "mode-switch" },
+                    React.createElement("button", { className: appMode === "movies" ? "active" : "", onClick: () => setAppMode("movies") }, "Movies"),
+                    React.createElement("button", { className: appMode === "music" ? "active" : "", onClick: () => setAppMode("music") }, "Music"))),
             React.createElement("div", { style: { textAlign: "right" } },
-                React.createElement("div", { className: "stats" },
+                appMode === "movies" && React.createElement("div", { className: "stats" },
                     React.createElement("strong", null, ratingsCount),
                     "logged \u00B7 avg ",
                     avgRating),
@@ -948,15 +1403,17 @@ function App() {
                     " ",
                     React.createElement("span", { className: "cast-chip", style: { padding: "2px 8px", fontSize: 11 }, onClick: handleSignOut }, "Sign out"))) : (React.createElement("button", { className: "ghost", style: { padding: "6px 12px", fontSize: 12 }, onClick: () => setShowAuthModal(true) }, "Log in to sync"))))),
         showAuthModal && React.createElement(AuthModal, { onClose: () => setShowAuthModal(false) }),
-        React.createElement("div", { className: "tabs" },
-            React.createElement("button", { className: `tab ${tab === "search" ? "active" : ""}`, onClick: () => setTab("search") }, "Search"),
-            React.createElement("button", { className: `tab ${tab === "log" ? "active" : ""}`, onClick: () => setTab("log") }, "My Log"),
-            React.createElement("button", { className: `tab ${tab === "queue" ? "active" : ""}`, onClick: () => setTab("queue") }, "My Queue"),
-            React.createElement("button", { className: `tab ${tab === "tonight" ? "active" : ""}`, onClick: () => setTab("tonight") }, "Tonight")),
-        tab === "search" && (React.createElement(SearchTab, { ratings: state.ratings, onRate: addRating, navRequest: navRequest, onConsumeNav: () => setNavRequest(null), onPlatformClick: handlePlatformClick, onActorClick: handleActorClick, queue: state.queue, onAddToQueue: addToQueue, onRemoveFromQueue: removeFromQueue })),
-        tab === "log" && (React.createElement(LogTab, { ratings: state.ratings, onRemove: removeRating, onRate: addRating, onPlatformClick: handlePlatformClick, onActorClick: handleActorClick })),
-        tab === "queue" && (React.createElement(QueueTab, { queue: state.queue, ratings: state.ratings, onRemoveFromQueue: removeFromQueue, onRate: addRating, onPlatformClick: handlePlatformClick, onActorClick: handleActorClick })),
-        tab === "tonight" && (React.createElement(TonightTab, { ratings: state.ratings, onRate: addRating, onPlatformClick: handlePlatformClick, onActorClick: handleActorClick, notForMeIds: state.notForMeIds, onAddNotForMe: addNotForMe, excludedGenres: state.excludedGenres, onAddExcludedGenre: addExcludedGenre, onRemoveExcludedGenre: removeExcludedGenre, genreDislikeCounts: state.genreDislikeCounts, queue: state.queue, onAddToQueue: addToQueue, onRemoveFromQueue: removeFromQueue })),
+        appMode === "movies" ? React.createElement(React.Fragment, null,
+            React.createElement("div", { className: "tabs" },
+                React.createElement("button", { className: `tab ${tab === "search" ? "active" : ""}`, onClick: () => setTab("search") }, "Search"),
+                React.createElement("button", { className: `tab ${tab === "log" ? "active" : ""}`, onClick: () => setTab("log") }, "My Log"),
+                React.createElement("button", { className: `tab ${tab === "queue" ? "active" : ""}`, onClick: () => setTab("queue") }, "My Queue"),
+                React.createElement("button", { className: `tab ${tab === "tonight" ? "active" : ""}`, onClick: () => setTab("tonight") }, "Tonight")),
+            tab === "search" && (React.createElement(SearchTab, { ratings: state.ratings, onRate: addRating, navRequest: navRequest, onConsumeNav: () => setNavRequest(null), onPlatformClick: handlePlatformClick, onActorClick: handleActorClick, queue: state.queue, onAddToQueue: addToQueue, onRemoveFromQueue: removeFromQueue })),
+            tab === "log" && (React.createElement(LogTab, { ratings: state.ratings, onRemove: removeRating, onRate: addRating, onPlatformClick: handlePlatformClick, onActorClick: handleActorClick })),
+            tab === "queue" && (React.createElement(QueueTab, { queue: state.queue, ratings: state.ratings, onRemoveFromQueue: removeFromQueue, onRate: addRating, onPlatformClick: handlePlatformClick, onActorClick: handleActorClick })),
+            tab === "tonight" && (React.createElement(TonightTab, { ratings: state.ratings, onRate: addRating, onPlatformClick: handlePlatformClick, onActorClick: handleActorClick, notForMeIds: state.notForMeIds, onAddNotForMe: addNotForMe, excludedGenres: state.excludedGenres, onAddExcludedGenre: addExcludedGenre, onRemoveExcludedGenre: removeExcludedGenre, genreDislikeCounts: state.genreDislikeCounts, queue: state.queue, onAddToQueue: addToQueue, onRemoveFromQueue: removeFromQueue }))
+        ) : React.createElement(MusicApp, { session: session, onRequireLogin: () => setShowAuthModal(true) }),
         React.createElement(ScrollToTop, null)));
 }
 function RatingModal({ movie, onSave, onClose, initial }) {
