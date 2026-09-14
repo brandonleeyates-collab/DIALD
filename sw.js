@@ -380,10 +380,12 @@ Source element: <body>
     background: rgba(10,7,4,0.7);
     backdrop-filter: blur(3px);
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     z-index: 50;
-    padding: 20px;
+    padding: 40px 20px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
     animation: overlayIn var(--med) var(--ease);
   }
   @keyframes overlayIn { from { opacity: 0; } to { opacity: 1; } }
@@ -603,13 +605,13 @@ Source element: <body>
   .music-section-actions { display: flex; gap: 6px; align-items: center; }
   .fav-heart-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
   .fav-heart-btn:hover { color: var(--accent); }
-  .fav-heart-btn.favorited { color: var(--accent); }
+  .fav-heart-btn.favorited { color: var(--gold); }
   .exclude-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
   .exclude-btn:hover { color: var(--danger); }
   .exclude-btn.excluded { color: var(--danger); }
   .card-icon-row { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; }
   .card-icon-btn { background: rgba(20,16,10,0.55); border: none; border-radius: 50%; width: 26px; height: 26px; color: #fff; font-size: 13px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-  .card-icon-btn.favorited { color: var(--accent); }
+  .card-icon-btn.favorited { color: var(--gold); }
   .card-icon-btn.excluded { color: var(--danger); }
   .card-icon-btn.digging { color: var(--gold); }
   .dig-btn { background: none; border: none; color: var(--text-faint); cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 4px; }
@@ -663,7 +665,7 @@ async function bandDumpCallFn(name, params) {
     return data;
 }
 const spotifySearchArtists = (q, limit = 10) => bandDumpCallFn("spotify-proxy", { action: "search", type: "artist", q, limit });
-const spotifySearchTracks = (q, limit = 10) => bandDumpCallFn("spotify-proxy", { action: "search", type: "track", q, limit });
+const spotifySearchTracks = (q, limit = 10, offset = 0) => bandDumpCallFn("spotify-proxy", { action: "search", type: "track", q, limit, offset });
 const lastfmSimilarArtists = (artist, limit = 10) => bandDumpCallFn("lastfm-proxy", { action: "similar-artists", artist, limit });
 const lastfmArtistInfo = (artist) => bandDumpCallFn("lastfm-proxy", { action: "artist-info", artist });
 const lastfmTopArtistsByTag = (tag, page = 1, limit = 25) => bandDumpCallFn("lastfm-proxy", { action: "top-artists-by-tag", tag, page, limit });
@@ -671,12 +673,36 @@ const lastfmSimilarTracks = (artist, track, limit = 10) => bandDumpCallFn("lastf
 
 // Spotify's own top-tracks endpoint (GET /v1/artists/{id}/top-tracks) is closed to
 // apps created after Nov 2024 (this one) — confirmed via a live 403. `search`
-// filtered by `artist:"Name"` is the documented, universal fallback, and it's what
-// the "Top Songs" list below actually uses.
-const spotifyTopSongsFallback = async (artistName, limit = 10) => {
-    const data = await spotifySearchTracks(`artist:"${artistName}"`, limit);
-    const tracks = (data.tracks && data.tracks.items) || [];
-    return [...tracks].sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+// filtered by `artist:"Name"` is the documented fallback, but a single 10-result
+// relevance search never reliably contains an artist's actual biggest hits, and
+// can also pull in tracks by a different, similarly-named artist. Page through
+// several batches of results instead, keep only tracks that actually credit this
+// exact Spotify artist ID (falling back to a name match if no ID is known), fold
+// duplicate titles down to their most-popular version (the same song often shows
+// up multiple times across albums/remasters/compilations), then sort by
+// popularity and take the top `limit`.
+const spotifyTopSongsFallback = async (artistName, artistId, limit = 10) => {
+    const PAGE_SIZE = 50;
+    const pageOffsets = [0, 1, 2].map(i => i * PAGE_SIZE);
+    const pages = await Promise.all(
+        pageOffsets.map(offset => spotifySearchTracks(`artist:"${artistName}"`, PAGE_SIZE, offset).catch(() => null))
+    );
+    const targetName = (artistName || "").trim().toLowerCase();
+    const byTitle = new Map();
+    pages.forEach(data => {
+        const tracks = (data && data.tracks && data.tracks.items) || [];
+        tracks.forEach(t => {
+            const credited = t.artists || [];
+            const isThisArtist = artistId
+                ? credited.some(a => a.id === artistId)
+                : credited.some(a => a.name && a.name.trim().toLowerCase() === targetName);
+            if (!isThisArtist) return;
+            const key = (t.name || "").trim().toLowerCase();
+            const existing = byTitle.get(key);
+            if (!existing || (t.popularity || 0) > (existing.popularity || 0)) byTitle.set(key, t);
+        });
+    });
+    return [...byTitle.values()].sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, limit);
 };
 
 // Curated tag list for genre browsing — Last.fm's own tag list is user-generated
@@ -690,6 +716,22 @@ const MUSIC_GENRES = [
 
 function stripHtml(s) {
     return (s || "").replace(/<[^>]*>/g, "").trim();
+}
+
+// Resolving a Last.fm artist NAME to a Spotify artist by just taking Spotify
+// search's #1 hit is how "Alabama" (the band) ends up showing Alabama Shakes'
+// photo — Spotify ranks by popularity, not exact-name match, so a shorter or
+// less-famous name loses to a longer name that merely contains it. Pull a
+// handful of candidates and prefer one whose name matches exactly
+// (case/whitespace-insensitive) before falling back to the top search hit.
+async function resolveArtistByName(name) {
+    if (!name) return null;
+    const data = await spotifySearchArtists(name, 5);
+    const items = (data.artists && data.artists.items) || [];
+    if (items.length === 0) return null;
+    const target = name.trim().toLowerCase();
+    const exact = items.find(a => a.name && a.name.trim().toLowerCase() === target);
+    return exact || items[0];
 }
 
 function lastfmImage(images) {
@@ -748,25 +790,49 @@ async function toggleDigArtist(spotifyArtist, userId, currentlyDigging) {
 
 async function ensureArtistRow(spotifyArtist) {
     const { data: existing } = await bandDumpDb.from("artists").select("*").eq("spotify_id", spotifyArtist.id).maybeSingle();
-    if (existing) return existing;
     const img = (spotifyArtist.images && spotifyArtist.images[0] && spotifyArtist.images[0].url) || null;
+    const spotifyUrl = (spotifyArtist.external_urls && spotifyArtist.external_urls.spotify) || null;
+    if (existing) return existing;
+    // A row may already exist for this same artist under a different (wrong)
+    // spotify_id — e.g. one saved back before resolveArtistByName started
+    // preferring an exact name match over Spotify's most-popular/relevant result.
+    // If we now have a verified-correct match for that name, correct that row's
+    // spotify_id/photo/link in place instead of inserting a duplicate — this keeps
+    // the user's existing ratings/queue/digging/favorites (which point at that
+    // row's id) intact while fixing whatever wrong photo got cached.
+    const { data: byName } = await bandDumpDb.from("artists").select("*").eq("name", spotifyArtist.name).maybeSingle();
+    if (byName) {
+        if (byName.spotify_id !== spotifyArtist.id) {
+            const { data: fixed, error: fixErr } = await bandDumpDb.from("artists").update({
+                spotify_id: spotifyArtist.id,
+                image_url: img,
+                spotify_url: spotifyUrl,
+            }).eq("id", byName.id).select().single();
+            if (!fixErr && fixed) return fixed;
+        }
+        return byName;
+    }
     const { data: inserted, error } = await bandDumpDb.from("artists").insert({
         spotify_id: spotifyArtist.id,
         name: spotifyArtist.name,
         image_url: img,
-        spotify_url: (spotifyArtist.external_urls && spotifyArtist.external_urls.spotify) || null,
+        spotify_url: spotifyUrl,
     }).select().single();
     if (error) throw error;
     let genres = spotifyArtist.genres || [];
     // Spotify's Dev Mode tier strips the `genres` field from artist objects entirely
     // (confirmed live — search and single-artist lookups both come back without it),
     // so fall back to Last.fm's community tags to get a first pass of genres attached.
-    // Still editable per-artist afterward from the artist page.
+    // Still editable per-artist afterward from the artist page. Last.fm's tags are
+    // user-submitted and occasionally include an artist's own name as a "tag" (seen
+    // live on several legacy country artists) — drop anything that's just the
+    // artist's own name so it can't show up masquerading as a genre.
     if (!genres.length) {
         try {
             const info = await lastfmArtistInfo(spotifyArtist.name);
             const tags = (info.artist && info.artist.tags && info.artist.tags.tag) || [];
-            genres = tags.slice(0, 4).map(t => t.name.toLowerCase());
+            const ownName = spotifyArtist.name.trim().toLowerCase();
+            genres = tags.map(t => t.name.toLowerCase()).filter(g => g !== ownName).slice(0, 4);
         } catch (e) { /* no genre data available anywhere — fine, can still be tagged manually */ }
     }
     if (genres.length) {
@@ -940,6 +1006,15 @@ function IconX({ size = 14 }) {
 function IconBookmark({ size = 13, filled = false }) {
     return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: "2", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-2px", marginRight: 5 } },
         React.createElement("path", { d: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" }));
+}
+// Outline until favorited, solid once it is — using an emoji here (⚡) doesn't
+// work for this because emoji render in full native color regardless of CSS
+// `color`, so an "unfavorited" and "favorited" button looked identical and you
+// couldn't tell a click had registered. An SVG with fill:none vs fill:currentColor
+// actually changes appearance with state.
+function IconBolt({ size = 15, filled = false }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: filled ? "0" : "1.8", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-3px" } },
+        React.createElement("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }));
 }
 function IconBan({ size = 13 }) {
     return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", style: { display: "inline-block", verticalAlign: "-2px", marginRight: 5 } },
@@ -1119,7 +1194,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
         setBio("");
         (async () => {
             const [songsResult, infoResult] = await Promise.allSettled([
-                spotifyTopSongsFallback(spotifyArtist.name, 10),
+                spotifyTopSongsFallback(spotifyArtist.name, spotifyArtist.id, 10),
                 lastfmArtistInfo(spotifyArtist.name),
             ]);
             if (cancelled) return;
@@ -1136,6 +1211,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
     async function addGenre() {
         const g = newGenre.trim().toLowerCase();
         if (!g || !artistRow) return;
+        if (g === artistRow.name.trim().toLowerCase()) { setNewGenre(""); return; } // an artist's own name isn't a genre
         await bandDumpDb.from("artist_genres").insert({ artist_id: artistRow.id, genre: g });
         setArtistRow(prev => ({ ...prev, genres: prev.genres.includes(g) ? prev.genres : [...prev.genres, g] }));
         setNewGenre("");
@@ -1239,7 +1315,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                     React.createElement("div", null,
                         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
                             React.createElement("h3", null, artistRow.name),
-                            React.createElement("button", { className: `fav-heart-btn ${status === "rated" ? "favorited" : ""}`, onClick: favoriteNow, title: "Add to favorite artists" }, "⚡"),
+                            React.createElement("button", { className: `fav-heart-btn ${status === "rated" ? "favorited" : ""}`, onClick: favoriteNow, title: "Add to favorite artists" }, React.createElement(IconBolt, { size: 16, filled: status === "rated" })),
                             React.createElement("button", { className: `dig-btn ${isDigging ? "digging" : ""}`, onClick: digNow, title: isDigging ? "Remove from Digging" : "I'm digging this right now" }, "🔥"),
                             React.createElement("button", { className: `exclude-btn ${status === "excluded" ? "excluded" : ""}`, onClick: excludeNow, title: "Don't recommend this artist to me" }, "☠"),
                             React.createElement(ShareButton, { title: artistRow.name, text: `Check out ${artistRow.name}`, url: artistRow.spotify_url || "" })),
@@ -1322,7 +1398,7 @@ function MusicArtistCard({ name, imageUrl, subtitle, onOpen, onFavorite, favorit
                     className: `card-icon-btn ${favorited ? "favorited" : ""}`,
                     onClick: e => { e.stopPropagation(); onFavorite(); },
                     title: "Add to favorite artists",
-                }, "⚡"))),
+                }, React.createElement(IconBolt, { size: 14, filled: favorited })))),
         React.createElement("div", { className: "card-body" },
             React.createElement("div", { className: "card-title" }, name),
             React.createElement("div", { className: "card-year" }, subtitle || "—"))));
@@ -1470,8 +1546,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
     async function resolveTrackArtist(track) {
         const artistName = track.artists && track.artists[0] && track.artists[0].name;
         if (!artistName) return null;
-        const data = await spotifySearchArtists(artistName, 1);
-        return (data.artists && data.artists.items && data.artists.items[0]) || null;
+        return await resolveArtistByName(artistName);
     }
     async function openTrackArtist(track) {
         setSongSearchError("");
@@ -1527,8 +1602,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                 // Spotify instead of trusting Last.fm's picture.
                 const resolved = await Promise.all(list.map(async a => {
                     try {
-                        const sr = await spotifySearchArtists(a.name, 1);
-                        const spotifyArtist = (sr.artists && sr.artists.items && sr.artists.items[0]) || null;
+                        const spotifyArtist = await resolveArtistByName(a.name);
                         return { name: a.name, listeners: a.listeners, spotifyArtist };
                     } catch (e) {
                         return { name: a.name, listeners: a.listeners, spotifyArtist: null };
@@ -1700,6 +1774,7 @@ function useMusicLibrary(session, refreshToken, statusFilter) {
 function MusicMyArtistsTab({ session, onOpenArtist, refreshToken }) {
     const { rows, loading } = useMusicLibrary(session, refreshToken, "rated");
     const [genreFilter, setGenreFilter] = useState("");
+    const [genresOpen, setGenresOpen] = useState(false);
     const allGenres = useMemo(() => {
         const s = new Set();
         rows.forEach(r => (r.artists.genres || []).forEach(g => s.add(g)));
@@ -1708,9 +1783,11 @@ function MusicMyArtistsTab({ session, onOpenArtist, refreshToken }) {
     const filtered = genreFilter ? rows.filter(r => (r.artists.genres || []).includes(genreFilter)) : rows;
     if (loading) return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…"));
     return (React.createElement("div", null,
-        allGenres.length > 0 && (React.createElement("div", { className: "pill-group", style: { margin: "14px 0" } },
-            React.createElement("button", { className: `pill ${!genreFilter ? "selected" : ""}`, onClick: () => setGenreFilter("") }, "All"),
-            allGenres.map(g => React.createElement("button", { className: `pill ${genreFilter === g ? "selected" : ""}`, key: g, onClick: () => setGenreFilter(g) }, g)))),
+        allGenres.length > 0 && React.createElement("div", { style: { margin: "14px 0" } },
+            React.createElement("button", { className: "pill", onClick: () => setGenresOpen(o => !o) }, genreFilter ? `Genre: ${genreFilter} ▾` : "Genre ▾"),
+            genresOpen && React.createElement("div", { className: "pill-group", style: { marginTop: 8 } },
+                React.createElement("button", { className: `pill ${!genreFilter ? "selected" : ""}`, onClick: () => { setGenreFilter(""); setGenresOpen(false); } }, "All"),
+                allGenres.map(g => React.createElement("button", { className: `pill ${genreFilter === g ? "selected" : ""}`, key: g, onClick: () => { setGenreFilter(g); setGenresOpen(false); } }, g)))),
         filtered.length === 0 ? (React.createElement("div", { className: "empty" },
             React.createElement("div", { className: "display" }, "No rated artists yet"),
             React.createElement("div", null, "Rate artists from the Discover tab and they'll show up here."))) : (
@@ -1929,6 +2006,25 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
     const [addedIds, setAddedIds] = useState([]);
     const [removedKeys, setRemovedKeys] = useState([]);
     const [expandedKey, setExpandedKey] = useState(null);
+    const [artistTopTrack, setArtistTopTrack] = useState({});
+    // Artists you've already hit ☠ "not for me" on, anywhere in the app — kept as
+    // lowercased names (not just spotify_id) so a result gets filtered out the
+    // moment it's resolved, before we'd otherwise spend a Spotify lookup on it.
+    const [excludedNames, setExcludedNames] = useState(new Set());
+
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            const { data } = await bandDumpDb
+                .from("user_artist_ratings")
+                .select("artists:artist_id (name)")
+                .eq("user_id", session.user.id)
+                .eq("status", "excluded");
+            if (cancelled) return;
+            setExcludedNames(new Set((data || []).map(r => r.artists && r.artists.name && r.artists.name.trim().toLowerCase()).filter(Boolean)));
+        })();
+        return () => { cancelled = true; };
+    }, [session.user.id]);
 
     async function findSeed(e) {
         if (e) e.preventDefault();
@@ -1978,13 +2074,13 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
             const seedArtistName = seed.type === "artist" ? seed.name : seed.artistName;
             if (resultType === "artists") {
                 if (!seedArtistName) { setMsg("Couldn't tell which artist to work from."); return; }
-                const data = await lastfmSimilarArtists(seedArtistName, 10);
-                const similar = (data.similarartists && data.similarartists.artist) || [];
+                const data = await lastfmSimilarArtists(seedArtistName, 20);
+                const similar = ((data.similarartists && data.similarartists.artist) || [])
+                    .filter(s => !excludedNames.has((s.name || "").trim().toLowerCase()));
                 const enriched = [];
                 for (const s of similar.slice(0, 10)) {
                     try {
-                        const artistData = await spotifySearchArtists(s.name, 1);
-                        const spotifyArtist = artistData.artists && artistData.artists.items && artistData.artists.items[0];
+                        const spotifyArtist = await resolveArtistByName(s.name);
                         if (spotifyArtist) enriched.push({ kind: "artist", key: spotifyArtist.id, name: s.name, spotifyArtist });
                     } catch (e2) { /* skip candidates Spotify can't resolve */ }
                 }
@@ -1993,11 +2089,14 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
             } else {
                 let candidateNames = [];
                 if (seed.type === "song") {
-                    const data = await lastfmSimilarTracks(seedArtistName, seed.name, 10);
-                    candidateNames = ((data.similartracks && data.similartracks.track) || []).map(t => ({ track: t.name, artist: t.artist && t.artist.name }));
+                    const data = await lastfmSimilarTracks(seedArtistName, seed.name, 20);
+                    candidateNames = ((data.similartracks && data.similartracks.track) || [])
+                        .filter(t => !excludedNames.has(((t.artist && t.artist.name) || "").trim().toLowerCase()))
+                        .map(t => ({ track: t.name, artist: t.artist && t.artist.name }));
                 } else {
-                    const data = await lastfmSimilarArtists(seedArtistName, 8);
-                    const similar = (data.similarartists && data.similarartists.artist) || [];
+                    const data = await lastfmSimilarArtists(seedArtistName, 16);
+                    const similar = ((data.similarartists && data.similarartists.artist) || [])
+                        .filter(s => !excludedNames.has((s.name || "").trim().toLowerCase()));
                     candidateNames = similar.map(s => ({ track: null, artist: s.name }));
                 }
                 const enriched = [];
@@ -2030,13 +2129,30 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
         try {
             await excludeArtist(r.spotifyArtist, session.user.id);
             setRemovedKeys(prev => [...prev, r.key]);
+            // Remember it locally too, so it's filtered out of results immediately —
+            // without waiting on a re-fetch — the next time Randomize runs, and never
+            // gets suggested again.
+            setExcludedNames(prev => new Set([...prev, (r.name || r.spotifyArtist.name || "").trim().toLowerCase()]));
             onChanged && onChanged();
         } catch (e) { setMsg(e.message); }
     }
+    // Lazily resolves and plays an artist result's most popular Spotify song —
+    // fetched once per row and cached, so repeat toggling doesn't re-fetch.
+    async function toggleArtistPreview(r) {
+        if (expandedKey === r.key) { setExpandedKey(null); return; }
+        if (artistTopTrack[r.key] === undefined) {
+            try {
+                const top = await spotifyTopSongsFallback(r.name, r.spotifyArtist.id, 1);
+                setArtistTopTrack(prev => ({ ...prev, [r.key]: (top[0] && top[0].id) || null }));
+            } catch (e2) {
+                setArtistTopTrack(prev => ({ ...prev, [r.key]: null }));
+            }
+        }
+        setExpandedKey(r.key);
+    }
     async function addSongResult(r) {
         try {
-            const artistData = await spotifySearchArtists(r.artistName || (r.track.artists[0] && r.track.artists[0].name) || "", 1);
-            const spotifyArtist = artistData.artists && artistData.artists.items && artistData.artists.items[0];
+            const spotifyArtist = await resolveArtistByName(r.artistName || (r.track.artists[0] && r.track.artists[0].name) || "");
             const row = spotifyArtist ? await ensureArtistRow(spotifyArtist) : null;
             const art = (r.track.album && r.track.album.images && r.track.album.images[0] && r.track.album.images[0].url) || null;
             const { error: err } = await bandDumpDb.from("favorite_songs").insert({ user_id: session.user.id, artist_id: row ? row.id : null, spotify_track_id: r.track.id, track_name: r.track.name, album_art_url: art });
@@ -2086,15 +2202,20 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
         msg && React.createElement("div", { className: "empty" }, React.createElement("div", null, msg)),
 
         visibleResults.map(r => r.kind === "artist"
-            ? React.createElement("div", { className: "log-row", key: r.key },
-                r.spotifyArtist.images && r.spotifyArtist.images.length
-                    ? React.createElement("img", { src: r.spotifyArtist.images[0].url, alt: "", style: { cursor: "pointer" }, onClick: () => onOpenArtist(r.spotifyArtist) })
-                    : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
-                React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => onOpenArtist(r.spotifyArtist) },
-                    React.createElement("div", { className: "log-row-title" }, r.name),
-                    React.createElement("div", { className: "log-row-meta" }, `similar to ${seed.name}`)),
-                React.createElement("button", { className: `fav-heart-btn ${addedIds.includes(r.key) ? "favorited" : ""}`, onClick: () => addArtistResult(r), title: "Add to My Artists" }, addedIds.includes(r.key) ? "⚡ Added" : "⚡ My Artists"),
-                React.createElement("button", { className: "exclude-btn", onClick: () => notForMeArtist(r), title: "Not for me" }, "☠"))
+            ? React.createElement(React.Fragment, { key: r.key },
+                React.createElement("div", { className: "log-row" },
+                    r.spotifyArtist.images && r.spotifyArtist.images.length
+                        ? React.createElement("img", { src: r.spotifyArtist.images[0].url, alt: "", style: { cursor: "pointer" }, onClick: () => onOpenArtist(r.spotifyArtist) })
+                        : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                    React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => onOpenArtist(r.spotifyArtist) },
+                        React.createElement("div", { className: "log-row-title" }, r.name),
+                        React.createElement("div", { className: "log-row-meta" }, `similar to ${seed.name}`)),
+                    React.createElement("button", { className: "ghost", style: { padding: "5px 8px", fontSize: 11.5 }, onClick: () => toggleArtistPreview(r), title: expandedKey === r.key ? "Hide player" : "Play their top song" }, expandedKey === r.key ? "✕" : "▶"),
+                    React.createElement("button", { className: `fav-heart-btn ${addedIds.includes(r.key) ? "favorited" : ""}`, style: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }, onClick: () => addArtistResult(r), title: "Add to My Artists" }, React.createElement(IconBolt, { size: 14, filled: addedIds.includes(r.key) }), addedIds.includes(r.key) ? "Added" : "My Artists"),
+                    React.createElement("button", { className: "exclude-btn", onClick: () => notForMeArtist(r), title: "Not for me — never suggest again" }, "☠")),
+                expandedKey === r.key && (artistTopTrack[r.key]
+                    ? React.createElement(SongPreviewFrame, { trackId: artistTopTrack[r.key] })
+                    : React.createElement("div", { style: { fontSize: 11.5, color: "var(--text-faint)", padding: "2px 0 10px" } }, artistTopTrack[r.key] === null ? "Couldn't find a song for them on Spotify." : "Loading…")))
             : React.createElement(React.Fragment, { key: r.key },
                 React.createElement("div", { className: "log-row" },
                     (r.track.album && r.track.album.images && r.track.album.images[0] && r.track.album.images[0].url)
