@@ -654,15 +654,56 @@ const bandDumpDb = supabaseClient ? supabaseClient.schema("banddump") : null;
 let bandDumpAccessToken = null; // kept in sync with the movie-side session, see App()
 function setBandDumpToken(session) { bandDumpAccessToken = (session && session.access_token) || null; }
 
-async function bandDumpCallFn(name, params) {
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function bandDumpCallFn(name, params, retries = 2) {
     const token = bandDumpAccessToken || SUPABASE_ANON_KEY;
     const qs = new URLSearchParams(params).toString();
     const res = await fetch(`${SUPABASE_URL}/functions/v1/${name}?${qs}`, {
         headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_ANON_KEY },
     });
+    // Spotify (and our proxy in front of it) rate-limits aggressively under
+    // bursts of parallel requests — genre browsing resolves ~50 artist names
+    // to Spotify IDs at once, which easily trips this. Back off and retry a
+    // couple times on 429 rather than surfacing "not found" for what's really
+    // just a throttled request.
+    if (res.status === 429 && retries > 0) {
+        const retryAfter = parseFloat(res.headers.get("Retry-After")) || 0;
+        await sleep(Math.max(retryAfter * 1000, 600) + Math.random() * 400);
+        return bandDumpCallFn(name, params, retries - 1);
+    }
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `${name} failed (${res.status})`);
+    if (!res.ok) {
+        // Our proxy passes Spotify's raw error body straight through on
+        // failure, and Spotify's own error shape is `{ error: { status,
+        // message } }` — an object, not a string. Stringifying an object
+        // with `new Error(obj)` produces the literal text "[object Object]",
+        // which is what was showing up under the search box. Dig out an
+        // actual message from whichever shape we got.
+        const raw = data.error;
+        const msg = typeof raw === "string" ? raw
+            : (raw && typeof raw === "object" && raw.message) ? raw.message
+            : (data.message) ? data.message
+            : `${name} failed (${res.status})`;
+        throw new Error(msg);
+    }
     return data;
+}
+
+// Runs async `fn` over `items` with at most `limit` in flight at once, instead
+// of firing them all via Promise.all — avoids hammering the Spotify proxy
+// (and tripping its rate limits) when resolving a big batch of names.
+async function mapWithConcurrency(items, limit, fn) {
+    const results = new Array(items.length);
+    let next = 0;
+    async function worker() {
+        while (next < items.length) {
+            const i = next++;
+            results[i] = await fn(items[i], i);
+        }
+    }
+    await Promise.all(new Array(Math.min(limit, items.length)).fill(0).map(worker));
+    return results;
 }
 const spotifySearchArtists = (q, limit = 10) => bandDumpCallFn("spotify-proxy", { action: "search", type: "artist", q, limit });
 const spotifySearchTracks = (q, limit = 10, offset = 0) => bandDumpCallFn("spotify-proxy", { action: "search", type: "track", q, limit, offset });
@@ -1016,6 +1057,14 @@ function IconBolt({ size = 15, filled = false }) {
     return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: filled ? "currentColor" : "none", stroke: "currentColor", strokeWidth: filled ? "0" : "1.8", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-3px" } },
         React.createElement("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" }));
 }
+// The skull-and-crossbones emoji ("☠") rendered too small and too thin to
+// read at a glance, especially in the small circular card buttons — a bold,
+// thick X reads clearly at any size and any zoom level, unlike a fiddly emoji.
+function IconExclude({ size = 20 }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "5", strokeLinecap: "round", style: { display: "inline-block", verticalAlign: "-4px" } },
+        React.createElement("line", { x1: "3", y1: "3", x2: "21", y2: "21" }),
+        React.createElement("line", { x1: "21", y1: "3", x2: "3", y2: "21" }));
+}
 function IconBan({ size = 13 }) {
     return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", style: { display: "inline-block", verticalAlign: "-2px", marginRight: 5 } },
         React.createElement("circle", { cx: "12", cy: "12", r: "9" }),
@@ -1046,8 +1095,40 @@ function IconShare({ size = 14 }) {
         React.createElement("polyline", { points: "16 6 12 2 8 6" }),
         React.createElement("line", { x1: "12", y1: "2", x2: "12", y2: "15" }));
 }
-// Web Share API where it exists (mobile Safari/Chrome); clipboard-copy fallback
-// everywhere else (most desktop browsers don't implement navigator.share).
+// Best available "who's sharing this" name: an explicitly-set display_name first
+// (see handleSetDisplayName), else a best-effort title-cased guess from the email
+// local-part, so a share never goes out with no attribution at all.
+// The live GitHub Pages URL DIALD is deployed at — used to build a DIALD-branded
+// share link (instead of a bare open.spotify.com link) that opens a small,
+// login-free landing page inside the app itself (see ShareLandingPage/hasShareParams
+// near the bottom of the file) showing who sent it, before the recipient needs any
+// account or Spotify login of their own.
+const DIALD_BASE_URL = "https://brandonleeyates-collab.github.io/DIALD/";
+
+function buildShareUrl({ shareType, itemId, title, artist, from }) {
+    if (!shareType || !itemId) return null;
+    const params = new URLSearchParams({ share: shareType, id: itemId, title: title || "" });
+    if (artist) params.set("artist", artist);
+    if (from) params.set("from", from);
+    return `${DIALD_BASE_URL}?${params.toString()}`;
+}
+function senderNameFrom(session) {
+    const dn = session && session.user && session.user.user_metadata && session.user.user_metadata.display_name;
+    if (dn && dn.trim()) return dn.trim();
+    const email = (session && session.user && session.user.email) || "";
+    const local = email.split("@")[0] || "";
+    if (!local) return "Someone";
+    return local.replace(/[._-]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+}
+function IconLink({ size = 14 }) {
+    return React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", style: { display: "inline-block", verticalAlign: "-2px" } },
+        React.createElement("path", { d: "M10 13a5 5 0 0 0 7.07 0l2.83-2.83a5 5 0 0 0-7.07-7.07L11.5 4.5" }),
+        React.createElement("path", { d: "M14 11a5 5 0 0 0-7.07 0L4.1 13.83a5 5 0 0 0 7.07 7.07l1.36-1.36" }));
+}
+// Web Share API where it exists (mobile Safari/Chrome) — opens the OS share sheet,
+// which doesn't have its own visible "copy link" step on most phones, so a
+// dedicated Copy Link button (below) is offered alongside it everywhere, not just
+// as a fallback for browsers without navigator.share.
 async function shareItem({ title, text, url }, onDone) {
     try {
         if (navigator.share) {
@@ -1064,15 +1145,80 @@ async function shareItem({ title, text, url }, onDone) {
         if (onDone) onDone("Couldn't share");
     }
 }
-function ShareButton({ title, text, url }) {
+async function copyLink(url, onDone) {
+    try {
+        await navigator.clipboard.writeText(url);
+        if (onDone) onDone("Link copied");
+    } catch (e) {
+        if (onDone) onDone("Couldn't copy");
+    }
+}
+// `session` is optional so old call sites don't break, but passing it is what
+// turns the share text into "<name> sent you ..." instead of a bare Spotify link.
+// `shareType`/`itemId` (+ `artist` for a track) build a DIALD link instead of a
+// bare open.spotify.com one — opening that link shows a login-free "<name> sent
+// you this" page (ShareLandingPage) with the song/artist embedded right there,
+// before the recipient needs any account of their own. Falls back to the raw
+// Spotify `url` if shareType/itemId weren't passed.
+function ShareButton({ title, text, url, session, shareType, itemId, artist }) {
     const [msg, setMsg] = useState("");
-    return React.createElement("span", { style: { position: "relative", display: "inline-flex", alignItems: "center" } },
+    const flash = m => { setMsg(m); setTimeout(() => setMsg(""), 1500); };
+    const senderName = session ? senderNameFrom(session) : null;
+    const fullText = senderName ? `${senderName} sent you ${text} via DIALD` : text;
+    const shareUrl = buildShareUrl({ shareType, itemId, title, artist, from: senderName }) || url;
+    return React.createElement("span", { style: { position: "relative", display: "inline-flex", alignItems: "center", gap: 2 } },
         React.createElement("button", {
             className: "share-btn",
             title: "Share",
-            onClick: e => { e.stopPropagation(); shareItem({ title, text, url }, m => { setMsg(m); setTimeout(() => setMsg(""), 1500); }); },
+            onClick: e => { e.stopPropagation(); shareItem({ title, text: fullText, url: shareUrl }, flash); },
         }, React.createElement(IconShare, { size: 14 })),
-        msg && React.createElement("span", { style: { position: "absolute", top: "100%", right: 0, fontSize: 10.5, color: "var(--sage)", whiteSpace: "nowrap", background: "var(--bg-raised-2)", padding: "2px 6px", borderRadius: 4, marginTop: 2 } }, msg));
+        React.createElement("button", {
+            className: "share-btn",
+            title: "Copy link",
+            onClick: e => { e.stopPropagation(); copyLink(shareUrl, flash); },
+        }, React.createElement(IconLink, { size: 14 })),
+        msg && React.createElement("span", { style: { position: "absolute", top: "100%", right: 0, fontSize: 10.5, color: "var(--sage)", whiteSpace: "nowrap", background: "var(--bg-raised-2)", padding: "2px 6px", borderRadius: 4, marginTop: 2, zIndex: 1 } }, msg));
+}
+// A no-login-required "someone sent you this" page. Reads ?share=track|artist
+// (plus id/title/artist/from) from the URL — set by buildShareUrl/ShareButton
+// above — and renders a standalone view with the song/artist embedded right
+// there via Spotify's public embed player, so the recipient doesn't need a
+// DIALD account or a Spotify login just to see what was shared with them.
+function getShareParams() {
+    const params = new URLSearchParams(window.location.search);
+    const share = params.get("share");
+    if (share !== "track" && share !== "artist") return null;
+    const id = params.get("id");
+    if (!id) return null;
+    return { type: share, id, title: params.get("title") || "", artist: params.get("artist") || "", from: params.get("from") || "" };
+}
+function hasShareParams() {
+    return !!getShareParams();
+}
+function ShareLandingPage() {
+    const p = getShareParams();
+    const embedSrc = `https://open.spotify.com/embed/${p.type}/${p.id}?utm_source=generator&theme=0`;
+    const openUrl = `https://open.spotify.com/${p.type}/${p.id}`;
+    return React.createElement("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, boxSizing: "border-box" } },
+        React.createElement("div", { style: { maxWidth: 420, width: "100%", background: "var(--bg-raised-2)", borderRadius: 16, padding: "30px 24px", textAlign: "center", boxShadow: "var(--shadow-md)" } },
+            React.createElement("div", { className: "display logo-wordmark", style: { fontSize: 22, marginBottom: 20 } },
+                "DIAL", React.createElement("span", { className: "logo-d" }, "D")),
+            React.createElement("div", { style: { fontSize: 14.5, color: "var(--text-dim)", marginBottom: 6 } },
+                p.from ? `${p.from} sent you a ${p.type === "track" ? "song" : "band"} on DIALD` : `Someone sent you a ${p.type === "track" ? "song" : "band"} on DIALD`),
+            React.createElement("div", { style: { fontSize: 19, fontWeight: 800, marginBottom: 20, lineHeight: 1.3 } },
+                p.type === "track" ? `"${p.title}"${p.artist ? " — " + p.artist : ""}` : p.title),
+            React.createElement("iframe", {
+                src: embedSrc, width: "100%", height: p.type === "track" ? 152 : 352, frameBorder: "0",
+                allow: "autoplay; encrypted-media; fullscreen; picture-in-picture",
+                loading: "lazy",
+                style: { borderRadius: 12, display: "block", marginBottom: 20 },
+            }),
+            React.createElement("a", {
+                href: openUrl, target: "_blank", rel: "noreferrer",
+                style: { display: "inline-block", textDecoration: "none", background: "var(--accent)", color: "#211A13", fontWeight: 700, fontSize: 14, padding: "11px 20px", borderRadius: "var(--radius-md)", marginBottom: 16 },
+            }, "Open in Spotify"),
+            React.createElement("div", null,
+                React.createElement("a", { href: DIALD_BASE_URL, style: { fontSize: 12.5, color: "var(--sage)" } }, "Explore more on DIALD ›"))));
 }
 function ScrollToTop() {
     const [show, setShow] = useState(false);
@@ -1129,6 +1275,9 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
     const [rating, setRating] = useState(7.0);
     const [notes, setNotes] = useState("");
     const [status, setStatus] = useState(null);
+    // Once an artist is rated, the full 1-10 button grid is just clutter — collapse
+    // it to the number you gave it, with a way to bring the grid back to change it.
+    const [editingRating, setEditingRating] = useState(false);
     const [saveMsg, setSaveMsg] = useState("");
     const [newGenre, setNewGenre] = useState("");
     const [songQuery, setSongQuery] = useState("");
@@ -1224,6 +1373,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
         const { error: err } = await bandDumpDb.from("user_artist_ratings").upsert({ user_id: session.user.id, artist_id: artistRow.id, rating, notes, status: "rated", rated_at: new Date().toISOString() });
         if (err) return setError(err.message);
         setStatus("rated");
+        setEditingRating(false);
         setSaveMsg("Saved");
         onChanged();
         setTimeout(() => setSaveMsg(""), 1500);
@@ -1317,8 +1467,8 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                             React.createElement("h3", null, artistRow.name),
                             React.createElement("button", { className: `fav-heart-btn ${status === "rated" ? "favorited" : ""}`, onClick: favoriteNow, title: "Add to favorite artists" }, React.createElement(IconBolt, { size: 16, filled: status === "rated" })),
                             React.createElement("button", { className: `dig-btn ${isDigging ? "digging" : ""}`, onClick: digNow, title: isDigging ? "Remove from Digging" : "I'm digging this right now" }, "🔥"),
-                            React.createElement("button", { className: `exclude-btn ${status === "excluded" ? "excluded" : ""}`, onClick: excludeNow, title: "Don't recommend this artist to me" }, "☠"),
-                            React.createElement(ShareButton, { title: artistRow.name, text: `Check out ${artistRow.name}`, url: artistRow.spotify_url || "" })),
+                            React.createElement("button", { className: `exclude-btn ${status === "excluded" ? "excluded" : ""}`, onClick: excludeNow, title: "Don't recommend this artist to me" }, React.createElement(IconExclude, { size: 22 })),
+                            React.createElement(ShareButton, { title: artistRow.name, text: `Check out ${artistRow.name}`, url: artistRow.spotify_url || "", session, shareType: "artist", itemId: artistRow.spotify_id })),
                         React.createElement("div", { className: "genre-tag-row" },
                             artistRow.genres.map(g => (React.createElement("span", { className: "genre-tag removable", key: g },
                                 g,
@@ -1329,11 +1479,15 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                 bio && React.createElement("p", { className: "artist-bio" }, bio.length > 320 ? bio.slice(0, 320) + "…" : bio),
                 error && React.createElement("div", { style: { color: "var(--danger)", fontSize: 12.5, marginTop: 10 } }, error),
                 React.createElement("label", null, "Rating"),
-                React.createElement(RatingButtons, { value: rating, onChange: setRating }),
+                (status === "rated" && !editingRating)
+                    ? React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginTop: 4 } },
+                        React.createElement("span", { style: { fontSize: 22, fontWeight: 800, color: "var(--gold)" } }, Number(rating).toFixed(1)),
+                        React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, onClick: () => setEditingRating(true) }, "Change rating"))
+                    : React.createElement(RatingButtons, { value: rating, onChange: setRating }),
                 React.createElement("label", null, "Notes"),
                 React.createElement("textarea", { value: notes, onChange: e => setNotes(e.target.value), rows: 2, style: { width: "100%", background: "var(--bg-raised-2)", border: "1px solid var(--divider)", borderRadius: "var(--radius-sm)", color: "var(--text)", padding: 8, fontFamily: "inherit", fontSize: 13 } }),
                 React.createElement("div", { className: "modal-actions" },
-                    React.createElement("button", { className: "primary", onClick: saveRating }, status === "rated" ? "Update rating" : "Save rating"),
+                    (status !== "rated" || editingRating) && React.createElement("button", { className: "primary", onClick: saveRating }, status === "rated" ? "Update rating" : "Save rating"),
                     React.createElement("button", { className: "ghost", onClick: addToQueue, disabled: status === "queued" }, status === "queued" ? "In queue" : "Add to queue")),
                 saveMsg && React.createElement("div", { style: { color: "var(--sage)", fontSize: 12, marginTop: 6 } }, saveMsg),
 
@@ -1388,7 +1542,7 @@ function MusicArtistCard({ name, imageUrl, subtitle, onOpen, onFavorite, favorit
                     className: `card-icon-btn ${excluded ? "excluded" : ""}`,
                     onClick: e => { e.stopPropagation(); onExclude(); },
                     title: "Don't recommend this artist to me",
-                }, "☠"),
+                }, React.createElement(IconExclude, { size: 18 })),
                 onDig && React.createElement("button", {
                     className: `card-icon-btn ${digging ? "digging" : ""}`,
                     onClick: e => { e.stopPropagation(); onDig(); },
@@ -1600,14 +1754,14 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                 // placeholder for years (a known API limitation) — resolve real
                 // photos, and a usable Spotify object to open/favorite, from
                 // Spotify instead of trusting Last.fm's picture.
-                const resolved = await Promise.all(list.map(async a => {
+                const resolved = await mapWithConcurrency(list, 4, async a => {
                     try {
                         const spotifyArtist = await resolveArtistByName(a.name);
                         return { name: a.name, listeners: a.listeners, spotifyArtist };
                     } catch (e) {
                         return { name: a.name, listeners: a.listeners, spotifyArtist: null };
                     }
-                }));
+                });
                 if (!cancelled) setGenreResults(resolved);
             } catch (e2) {
                 if (!cancelled) setGenreError(e2.message || "Couldn't reach Last.fm.");
@@ -1893,7 +2047,7 @@ function MusicMySongsTab({ session, onOpenArtist, refreshToken }) {
                         React.createElement("div", { className: "log-row-title" }, s.track_name),
                         React.createElement("div", { className: "log-row-meta" }, s.artists ? s.artists.name : "")),
                     React.createElement(SongPreviewToggle, { trackId: s.spotify_track_id, expanded: expandedTrackId === s.id, onToggle: () => setExpandedTrackId(expandedTrackId === s.id ? null : s.id) }),
-                    React.createElement(ShareButton, { title: s.track_name, text: `"${s.track_name}"${s.artists ? " by " + s.artists.name : ""}`, url: `https://open.spotify.com/track/${s.spotify_track_id}` }),
+                    React.createElement(ShareButton, { title: s.track_name, text: `"${s.track_name}"${s.artists ? " by " + s.artists.name : ""}`, url: `https://open.spotify.com/track/${s.spotify_track_id}`, session, shareType: "track", itemId: s.spotify_track_id, artist: s.artists ? s.artists.name : "" }),
                     React.createElement("button", { className: "remove-btn", onClick: () => removeSong(s.id) }, React.createElement(IconX, { size: 13 }))),
                 expandedTrackId === s.id && React.createElement(SongPreviewFrame, { trackId: s.spotify_track_id }))))));
 }
@@ -1970,7 +2124,7 @@ function DiggingTab({ session, onOpenArtist, refreshToken }) {
                 r.artists.image_url ? React.createElement("img", { src: r.artists.image_url, alt: "", onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
                 React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => onOpenArtist(shimArtistFromRow(r.artists)) },
                     React.createElement("div", { className: "log-row-title" }, r.artists.name)),
-                React.createElement(ShareButton, { title: r.artists.name, text: `Digging ${r.artists.name} right now`, url: r.artists.spotify_url || "" }),
+                React.createElement(ShareButton, { title: r.artists.name, text: `Digging ${r.artists.name} right now`, url: r.artists.spotify_url || "", session, shareType: "artist", itemId: r.artists.spotify_id }),
                 React.createElement("button", { className: "remove-btn", onClick: () => removeDiggingArtist(r.id) }, React.createElement(IconX, { size: 13 }))))),
 
         React.createElement("label", { style: { marginTop: 22, display: "block" } }, "Songs"),
@@ -1983,7 +2137,7 @@ function DiggingTab({ session, onOpenArtist, refreshToken }) {
                         React.createElement("div", { className: "log-row-title" }, s.track_name),
                         React.createElement("div", { className: "log-row-meta" }, s.artists ? s.artists.name : "")),
                     React.createElement(SongPreviewToggle, { trackId: s.spotify_track_id, expanded: expandedTrackId === s.id, onToggle: () => setExpandedTrackId(expandedTrackId === s.id ? null : s.id) }),
-                    React.createElement(ShareButton, { title: s.track_name, text: `Digging "${s.track_name}"${s.artists ? " by " + s.artists.name : ""} right now`, url: `https://open.spotify.com/track/${s.spotify_track_id}` }),
+                    React.createElement(ShareButton, { title: s.track_name, text: `Digging "${s.track_name}"${s.artists ? " by " + s.artists.name : ""} right now`, url: `https://open.spotify.com/track/${s.spotify_track_id}`, session, shareType: "track", itemId: s.spotify_track_id, artist: s.artists ? s.artists.name : "" }),
                     React.createElement("button", { className: "remove-btn", onClick: () => removeDiggingSong(s.id) }, React.createElement(IconX, { size: 13 }))),
                 expandedTrackId === s.id && React.createElement(SongPreviewFrame, { trackId: s.spotify_track_id }))))));
 }
@@ -2030,6 +2184,11 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
     // lowercased names (not just spotify_id) so a result gets filtered out the
     // moment it's resolved, before we'd otherwise spend a Spotify lookup on it.
     const [excludedNames, setExcludedNames] = useState(new Set());
+    // Names already shown for the CURRENT seed (any past Randomize click, not just
+    // the visible batch) — without this, hitting Randomize again just returns the
+    // same top-ranked candidates every time, which reads as "there's no way to get
+    // more." Reset whenever the seed changes.
+    const [seenNames, setSeenNames] = useState(new Set());
 
     useEffect(() => {
         let cancelled = false;
@@ -2074,22 +2233,26 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
         setSeedOptions([]);
         setSeedQuery("");
         setResults([]);
+        setSeenNames(new Set());
         setMsg("");
     }
     function pickMyArtist(entry) {
         setSeed({ type: "artist", name: entry.name, spotifyArtist: entry.spotifyArtist });
         setResults([]);
+        setSeenNames(new Set());
         setMsg("");
     }
     function pickGenre(genre) {
         if (!genre) return;
         setSeed({ type: "genre", name: genre });
         setResults([]);
+        setSeenNames(new Set());
         setMsg("");
     }
     function clearSeed() {
         setSeed(null);
         setResults([]);
+        setSeenNames(new Set());
         setMsg("");
     }
 
@@ -2103,75 +2266,86 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
         setAddedIds([]);
         setRemovedKeys([]);
         try {
+            // Shuffled so repeat Randomize clicks don't just hand back the same
+            // top-ranked candidates every time, and filtered against seenNames so
+            // anything already shown for this seed this round doesn't come back —
+            // that combination is what actually makes "hit Randomize again" produce
+            // a genuinely new batch instead of the same 10 (or fewer, once some are
+            // excluded) over and over.
+            const freshNamePool = (names) => names
+                .filter(n => n && !excludedNames.has(n.trim().toLowerCase()) && !seenNames.has(n.trim().toLowerCase()))
+                .sort(() => Math.random() - 0.5);
+            const newlySeen = [];
+            const exhausted = () => { setMsg(`That's everything similar for "${seed.name}" — try a different seed for more.`); };
+
             if (seed.type === "genre") {
                 // A genre seed pulls straight from Last.fm's tag data (same source as
-                // Search's Genre browse) instead of a similar-to-one-artist graph —
-                // shuffled, since "top artists for a tag" would otherwise return the
-                // same head of the list every time.
+                // Search's Genre browse) instead of a similar-to-one-artist graph.
                 const data = await lastfmTopArtistsByTag(seed.name, 1, 50);
-                const candidates = ((data.topartists && data.topartists.artist) || [])
-                    .filter(a => !excludedNames.has((a.name || "").trim().toLowerCase()))
-                    .sort(() => Math.random() - 0.5);
+                const candidates = freshNamePool(((data.topartists && data.topartists.artist) || []).map(a => a.name));
                 const enriched = [];
-                for (const a of candidates) {
+                for (const name of candidates) {
                     if (enriched.length >= TARGET_RESULTS) break;
                     try {
-                        const spotifyArtist = await resolveArtistByName(a.name);
+                        const spotifyArtist = await resolveArtistByName(name);
                         if (!spotifyArtist) continue;
+                        newlySeen.push(name);
                         if (resultType === "artists") {
-                            enriched.push({ kind: "artist", key: spotifyArtist.id, name: a.name, spotifyArtist });
+                            enriched.push({ kind: "artist", key: spotifyArtist.id, name, spotifyArtist });
                         } else {
-                            const top = await spotifyTopSongsFallback(a.name, spotifyArtist.id, 1);
-                            if (top[0]) enriched.push({ kind: "song", key: top[0].id, track: top[0], artistName: a.name });
+                            const top = await spotifyTopSongsFallback(name, spotifyArtist.id, 1);
+                            if (top[0]) enriched.push({ kind: "song", key: top[0].id, track: top[0], artistName: name });
                         }
                     } catch (e2) { /* skip candidates Spotify can't resolve */ }
                 }
-                if (enriched.length === 0) setMsg(`Couldn't find ${resultType} for the "${seed.name}" genre.`);
+                if (enriched.length === 0) { candidates.length ? exhausted() : setMsg(`Couldn't find ${resultType} for the "${seed.name}" genre.`); }
                 setResults(enriched);
+                setSeenNames(prev => new Set([...prev, ...newlySeen.map(n => n.trim().toLowerCase())]));
                 return;
             }
 
             const seedArtistName = seed.type === "artist" ? seed.name : seed.artistName;
             if (resultType === "artists") {
                 if (!seedArtistName) { setMsg("Couldn't tell which artist to work from."); return; }
-                const data = await lastfmSimilarArtists(seedArtistName, 30);
-                const similar = ((data.similarartists && data.similarartists.artist) || [])
-                    .filter(s => !excludedNames.has((s.name || "").trim().toLowerCase()));
+                const data = await lastfmSimilarArtists(seedArtistName, 50);
+                const candidates = freshNamePool(((data.similarartists && data.similarartists.artist) || []).map(s => s.name));
                 const enriched = [];
-                for (const s of similar) {
+                for (const name of candidates) {
                     if (enriched.length >= TARGET_RESULTS) break;
                     try {
-                        const spotifyArtist = await resolveArtistByName(s.name);
-                        if (spotifyArtist) enriched.push({ kind: "artist", key: spotifyArtist.id, name: s.name, spotifyArtist });
+                        const spotifyArtist = await resolveArtistByName(name);
+                        if (spotifyArtist) { enriched.push({ kind: "artist", key: spotifyArtist.id, name, spotifyArtist }); newlySeen.push(name); }
                     } catch (e2) { /* skip candidates Spotify can't resolve */ }
                 }
-                if (enriched.length === 0) setMsg(`Last.fm didn't have similar-artist data for ${seedArtistName}.`);
+                if (enriched.length === 0) { candidates.length ? exhausted() : setMsg(`Last.fm didn't have similar-artist data for ${seedArtistName}.`); }
                 setResults(enriched);
+                setSeenNames(prev => new Set([...prev, ...newlySeen.map(n => n.trim().toLowerCase())]));
             } else {
-                let candidateNames = [];
+                let candidatePairs = [];
                 if (seed.type === "song") {
-                    const data = await lastfmSimilarTracks(seedArtistName, seed.name, 30);
-                    candidateNames = ((data.similartracks && data.similartracks.track) || [])
-                        .filter(t => !excludedNames.has(((t.artist && t.artist.name) || "").trim().toLowerCase()))
-                        .map(t => ({ track: t.name, artist: t.artist && t.artist.name }));
+                    const data = await lastfmSimilarTracks(seedArtistName, seed.name, 50);
+                    candidatePairs = ((data.similartracks && data.similartracks.track) || []).map(t => ({ track: t.name, artist: t.artist && t.artist.name }));
                 } else {
-                    const data = await lastfmSimilarArtists(seedArtistName, 25);
-                    const similar = ((data.similarartists && data.similarartists.artist) || [])
-                        .filter(s => !excludedNames.has((s.name || "").trim().toLowerCase()));
-                    candidateNames = similar.map(s => ({ track: null, artist: s.name }));
+                    const data = await lastfmSimilarArtists(seedArtistName, 40);
+                    candidatePairs = ((data.similarartists && data.similarartists.artist) || []).map(s => ({ track: null, artist: s.name }));
                 }
+                const seenKey = c => (c.track ? `${c.track}::${c.artist}` : c.artist || "").trim().toLowerCase();
+                const candidates = candidatePairs
+                    .filter(c => c.artist && !excludedNames.has((c.artist || "").trim().toLowerCase()) && !seenNames.has(seenKey(c)))
+                    .sort(() => Math.random() - 0.5);
                 const enriched = [];
-                for (const c of candidateNames) {
+                for (const c of candidates) {
                     if (enriched.length >= TARGET_RESULTS) break;
                     try {
                         const q = c.track ? `track:${c.track} artist:${c.artist}` : `artist:${c.artist}`;
                         const data = await spotifySearchTracks(q, 1);
                         const track = data.tracks && data.tracks.items && data.tracks.items[0];
-                        if (track) enriched.push({ kind: "song", key: track.id, track, artistName: c.artist });
+                        if (track) { enriched.push({ kind: "song", key: track.id, track, artistName: c.artist }); newlySeen.push(seenKey(c)); }
                     } catch (e2) { /* skip candidates Spotify can't resolve */ }
                 }
-                if (enriched.length === 0) setMsg(`Last.fm didn't have similar-song data for "${seed.name}".`);
+                if (enriched.length === 0) { candidates.length ? exhausted() : setMsg(`Last.fm didn't have similar-song data for "${seed.name}".`); }
                 setResults(enriched);
+                setSeenNames(prev => new Set([...prev, ...newlySeen]));
             }
         } catch (e) {
             setMsg(e.message || "Something went wrong.");
@@ -2289,7 +2463,7 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
                         React.createElement("div", { className: "log-row-meta" }, `similar to ${seed.name}`)),
                     React.createElement("button", { className: "ghost", style: { padding: "5px 8px", fontSize: 11.5 }, onClick: () => toggleArtistPreview(r), title: expandedKey === r.key ? "Hide player" : "Play their top song" }, expandedKey === r.key ? "✕" : "▶"),
                     React.createElement("button", { className: `fav-heart-btn ${addedIds.includes(r.key) ? "favorited" : ""}`, style: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }, onClick: () => addArtistResult(r), title: "Add to My Artists" }, React.createElement(IconBolt, { size: 14, filled: addedIds.includes(r.key) }), addedIds.includes(r.key) ? "Added" : "My Artists"),
-                    React.createElement("button", { className: "exclude-btn", onClick: () => notForMeArtist(r), title: "Not for me — never suggest again" }, "☠")),
+                    React.createElement("button", { className: "exclude-btn", onClick: () => notForMeArtist(r), title: "Not for me — never suggest again" }, React.createElement(IconExclude, { size: 22 }))),
                 expandedKey === r.key && (artistTopTrack[r.key]
                     ? React.createElement(SongPreviewFrame, { trackId: artistTopTrack[r.key] })
                     : React.createElement("div", { style: { fontSize: 11.5, color: "var(--text-faint)", padding: "2px 0 10px" } }, artistTopTrack[r.key] === null ? "Couldn't find a song for them on Spotify." : "Loading…")))
@@ -2303,7 +2477,7 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
                         React.createElement("div", { className: "log-row-meta" }, `${r.artistName || (r.track.artists[0] && r.track.artists[0].name) || ""} · similar to ${seed.name}`)),
                     React.createElement(SongPreviewToggle, { trackId: r.track.id, expanded: expandedKey === r.key, onToggle: () => setExpandedKey(expandedKey === r.key ? null : r.key) }),
                     React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: addedIds.includes(r.key) ? "var(--gold)" : undefined }, onClick: () => addSongResult(r), title: "Add to My Songs" }, addedIds.includes(r.key) ? "Added" : "+ My Songs"),
-                    React.createElement("button", { className: "exclude-btn", onClick: () => notForMeSong(r), title: "Not for me" }, "☠")),
+                    React.createElement("button", { className: "exclude-btn", onClick: () => notForMeSong(r), title: "Not for me" }, React.createElement(IconExclude, { size: 22 }))),
                 expandedKey === r.key && React.createElement(SongPreviewFrame, { trackId: r.track.id })))));
 }
 
@@ -2399,6 +2573,18 @@ function App() {
         if (supabaseClient)
             await supabaseClient.auth.signOut();
         setSession(null);
+    }
+    async function handleSetDisplayName() {
+        if (!supabaseClient || !session) return;
+        const current = senderNameFrom(session);
+        const next = window.prompt("Your name, shown on things you share (e.g. \"sent to you by ___\"):", current);
+        if (next == null) return; // cancelled
+        const trimmed = next.trim();
+        if (!trimmed) return;
+        const { error: err } = await supabaseClient.auth.updateUser({ data: { display_name: trimmed } });
+        if (err) window.alert(err.message || "Couldn't save that name.");
+        // onAuthStateChange fires a USER_UPDATED event on success and refreshes
+        // `session` itself, so no manual setSession needed here.
     }
     const ratingsCount = Object.keys(state.ratings).length;
     const avgRating = ratingsCount
@@ -2504,7 +2690,11 @@ function App() {
                 React.createElement("div", { style: { marginTop: 8 } }, session === undefined ? null : session ? (React.createElement("div", { style: { fontSize: 11.5, color: "var(--text-dim)" } },
                     syncing ? "Syncing…" : `Synced as ${session.user.email}`,
                     " ",
-                    React.createElement("span", { className: "cast-chip", style: { padding: "2px 8px", fontSize: 11 }, onClick: handleSignOut }, "Sign out"))) : (React.createElement("button", { className: "ghost", style: { padding: "6px 12px", fontSize: 12 }, onClick: () => setShowAuthModal(true) }, "Log in to sync"))))),
+                    React.createElement("span", { className: "cast-chip", style: { padding: "2px 8px", fontSize: 11 }, onClick: handleSignOut }, "Sign out"))) : (React.createElement("button", { className: "ghost", style: { padding: "6px 12px", fontSize: 12 }, onClick: () => setShowAuthModal(true) }, "Log in to sync"))),
+                session && React.createElement("div", { style: { marginTop: 4, fontSize: 11.5, color: "var(--text-dim)" } },
+                    `Sharing as ${senderNameFrom(session)}`,
+                    " ",
+                    React.createElement("span", { className: "cast-chip", style: { padding: "2px 8px", fontSize: 11 }, onClick: handleSetDisplayName }, "Change")))),
         showAuthModal && React.createElement(AuthModal, { onClose: () => setShowAuthModal(false) }),
         appMode === "movies" ? React.createElement(React.Fragment, null,
             React.createElement("div", { className: "tabs" },
@@ -3524,7 +3714,7 @@ function TonightTab({ ratings, onRate, onPlatformClick, onActorClick, notForMeId
         trailerMovie && (React.createElement(TrailerModal, { movie: trailerMovie, onClose: () => setTrailerMovie(null) })),
         detailMovieId && (React.createElement(MovieDetailModal, { movieId: detailMovieId, ratings: ratings, onClose: () => setDetailMovieId(null), onRate: (m) => { setModalMovie(m); setDetailMovieId(null); }, onTrailer: (m) => { setTrailerMovie(m); setDetailMovieId(null); }, onActorClick: onActorClick, onPlatformClick: onPlatformClick, queue: queue, onAddToQueue: onAddToQueue }))));
 }
-ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App, null));
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(hasShareParams() ? ShareLandingPage : App, null));
 </script>
 <script>
   if ("serviceWorker" in navigator) {
