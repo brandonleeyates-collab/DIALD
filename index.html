@@ -625,6 +625,45 @@ Source element: <body>
   .genre-pick-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0; }
   .pagination-row { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 18px 0; font-size: 12.5px; color: var(--text-dim); }
   .pagination-row button:disabled { opacity: 0.4; cursor: default; }
+
+  /* --- Music mode: Need to Check Out --- */
+  .checkout-section { margin-top: 22px; }
+  .checkout-section:first-child { margin-top: 6px; }
+  .checkout-heading {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-dim); font-weight: 700; margin: 0 0 10px;
+  }
+  .checkout-count {
+    background: var(--bg-raised-2); color: var(--text-dim);
+    font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px;
+  }
+  .checkout-row {
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px; margin-bottom: 8px;
+    background: var(--bg-raised); border-radius: var(--radius-md);
+    transition: background var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+  }
+  .checkout-row:hover { background: var(--bg-raised-2); box-shadow: var(--shadow-sm); }
+  .checkout-row img {
+    width: 56px; height: 56px; object-fit: cover;
+    border-radius: 10px; flex-shrink: 0;
+    background: var(--divider); box-shadow: var(--shadow-sm);
+  }
+  .checkout-row-art-fallback {
+    width: 56px; height: 56px; border-radius: 10px; flex-shrink: 0;
+    background: var(--bg-raised-2); display: flex; align-items: center; justify-content: center;
+    color: var(--text-faint); font-size: 20px;
+  }
+  .checkout-row-title { font-weight: 700; font-size: 14.5px; line-height: 1.3; }
+  .checkout-row-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  .checkout-row-actions { display: flex; align-items: center; gap: 2px; margin-left: auto; flex-shrink: 0; }
+  .checkout-empty {
+    color: var(--text-faint); font-size: 13px; font-style: italic;
+    padding: 22px 14px; text-align: center;
+    background: var(--bg-raised); border-radius: var(--radius-md);
+    border: 1px dashed var(--divider);
+  }
 </style>
 </head>
 <body>
@@ -722,9 +761,15 @@ const lastfmSimilarTracks = (artist, track, limit = 10) => bandDumpCallFn("lastf
 // duplicate titles down to their most-popular version (the same song often shows
 // up multiple times across albums/remasters/compilations), then sort by
 // popularity and take the top `limit`.
+//
+// PAGE_SIZE=10 is load-bearing, not a style choice: Spotify's docs say `search`
+// accepts limit up to 50, but this app's tier actually rejects anything over 10
+// with a 400 "Invalid limit" (confirmed live) — silently, since a failed page
+// was swallowed by the .catch below, so it looked like "no songs found" instead
+// of an API error. Page more times at 10 each to keep the same ~50-track window.
 const spotifyTopSongsFallback = async (artistName, artistId, limit = 10) => {
-    const PAGE_SIZE = 50;
-    const pageOffsets = [0, 1, 2].map(i => i * PAGE_SIZE);
+    const PAGE_SIZE = 10;
+    const pageOffsets = [0, 1, 2, 3, 4].map(i => i * PAGE_SIZE);
     const pages = await Promise.all(
         pageOffsets.map(offset => spotifySearchTracks(`artist:"${artistName}"`, PAGE_SIZE, offset).catch(() => null))
     );
@@ -1197,7 +1242,7 @@ function hasShareParams() {
 }
 function ShareLandingPage() {
     const p = getShareParams();
-    const embedSrc = `https://open.spotify.com/embed/${p.type}/${p.id}?utm_source=generator&theme=0`;
+    const embedSrc = `https://open.spotify.com/embed/${p.type}/${p.id}?utm_source=generator&theme=0&autoplay=1`;
     const openUrl = `https://open.spotify.com/${p.type}/${p.id}`;
     return React.createElement("div", { style: { minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, boxSizing: "border-box" } },
         React.createElement("div", { style: { maxWidth: 420, width: "100%", background: "var(--bg-raised-2)", borderRadius: 16, padding: "30px 24px", textAlign: "center", boxShadow: "var(--shadow-md)" } },
@@ -1466,7 +1511,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
                             React.createElement("h3", null, artistRow.name),
                             React.createElement("button", { className: `fav-heart-btn ${status === "rated" ? "favorited" : ""}`, onClick: favoriteNow, title: "Add to favorite artists" }, React.createElement(IconBolt, { size: 16, filled: status === "rated" })),
-                            React.createElement("button", { className: `dig-btn ${isDigging ? "digging" : ""}`, onClick: digNow, title: isDigging ? "Remove from Digging" : "I'm digging this right now" }, "🔥"),
+                            React.createElement("button", { className: `dig-btn ${isDigging ? "digging" : ""}`, onClick: digNow, title: isDigging ? "Remove from Need to Check Out" : "Check out later" }, "🔥"),
                             React.createElement("button", { className: `exclude-btn ${status === "excluded" ? "excluded" : ""}`, onClick: excludeNow, title: "Don't recommend this artist to me" }, React.createElement(IconExclude, { size: 22 })),
                             React.createElement(ShareButton, { title: artistRow.name, text: `Check out ${artistRow.name}`, url: artistRow.spotify_url || "", session, shareType: "artist", itemId: artistRow.spotify_id })),
                         React.createElement("div", { className: "genre-tag-row" },
@@ -1505,7 +1550,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                                     React.createElement("div", { className: "music-section-actions" },
                                         React.createElement(SongPreviewToggle, { trackId: t.id, expanded: expandedTrackId === t.id, onToggle: () => setExpandedTrackId(expandedTrackId === t.id ? null : t.id) }),
                                         React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, onClick: () => addFavSong(t) }, "+ Like"),
-                                        React.createElement("button", { className: `ghost ${diggingSongIds.includes(t.id) ? "digging" : ""}`, style: { padding: "5px 10px", fontSize: 11.5, color: diggingSongIds.includes(t.id) ? "var(--gold)" : undefined }, onClick: () => toggleSongDigging(t) }, diggingSongIds.includes(t.id) ? "🔥 Digging" : "🔥 Dig"),
+                                        React.createElement("button", { className: `ghost ${diggingSongIds.includes(t.id) ? "digging" : ""}`, style: { padding: "5px 10px", fontSize: 11.5, color: diggingSongIds.includes(t.id) ? "var(--gold)" : undefined }, onClick: () => toggleSongDigging(t) }, diggingSongIds.includes(t.id) ? "🔥 Added" : "🔥"),
                                         React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, disabled: queuedSongIds.includes(t.id), onClick: () => addSongToQueue(t) }, queuedSongIds.includes(t.id) ? "Queued" : "+ Queue"))),
                                 expandedTrackId === t.id && React.createElement(SongPreviewFrame, { trackId: t.id })))))),
 
@@ -1521,7 +1566,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                                 React.createElement("div", { className: "log-row-title" }, t.name),
                                 React.createElement("div", { className: "log-row-meta" }, (t.album && t.album.name) || "")),
                             React.createElement(SongPreviewToggle, { trackId: t.id, expanded: expandedTrackId === t.id, onToggle: () => setExpandedTrackId(expandedTrackId === t.id ? null : t.id) }),
-                            React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: diggingSongIds.includes(t.id) ? "var(--gold)" : undefined }, onClick: () => toggleSongDigging(t) }, diggingSongIds.includes(t.id) ? "🔥 Digging" : "🔥 Dig"),
+                            React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: diggingSongIds.includes(t.id) ? "var(--gold)" : undefined }, onClick: () => toggleSongDigging(t) }, diggingSongIds.includes(t.id) ? "🔥 Added" : "🔥"),
                             React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, onClick: () => addFavSong(t) }, "+ Add")),
                         expandedTrackId === t.id && React.createElement(SongPreviewFrame, { trackId: t.id }))))),
                 React.createElement("div", { style: { marginTop: 10 } },
@@ -1546,7 +1591,7 @@ function MusicArtistCard({ name, imageUrl, subtitle, onOpen, onFavorite, favorit
                 onDig && React.createElement("button", {
                     className: `card-icon-btn ${digging ? "digging" : ""}`,
                     onClick: e => { e.stopPropagation(); onDig(); },
-                    title: digging ? "Remove from Digging" : "I'm digging this right now",
+                    title: digging ? "Remove from Need to Check Out" : "Check out later",
                 }, "🔥"),
                 onFavorite && React.createElement("button", {
                     className: `card-icon-btn ${favorited ? "favorited" : ""}`,
@@ -1570,7 +1615,13 @@ function SongPreviewToggle({ trackId, expanded, onToggle }) {
 }
 function SongPreviewFrame({ trackId }) {
     return React.createElement("iframe", {
-        src: `https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0`,
+        // autoplay=1: without it, clicking ▶ only reveals Spotify's own embed
+        // player, which then needs a second click on ITS play button to
+        // actually start audio — reads as a broken/duplicate play control.
+        // Spotify's embed widget honors this param and starts playing as soon
+        // as it loads, so the one click that reveals it is the only click
+        // needed. (allow="autoplay" below is what lets the browser honor it.)
+        src: `https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0&autoplay=1`,
         width: "100%", height: "80", frameBorder: "0",
         allow: "autoplay; encrypted-media; fullscreen; picture-in-picture",
         loading: "lazy",
@@ -1861,7 +1912,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                                 React.createElement("div", { className: "log-row-title" }, t.name),
                                 React.createElement("div", { className: "log-row-meta" }, `${artistNames}${t.album && t.album.name ? " · " + t.album.name : ""}`)),
                             React.createElement(SongPreviewToggle, { trackId: t.id, expanded: expandedTrackId === t.id, onToggle: () => setExpandedTrackId(prev => prev === t.id ? null : t.id) }),
-                            React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: diggingTrackIds.includes(t.id) ? "var(--gold)" : undefined }, disabled: diggingTrackIds.includes(t.id), onClick: () => digTrackFromSearch(t) }, diggingTrackIds.includes(t.id) ? "🔥 Digging" : "🔥 Dig"),
+                            React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: diggingTrackIds.includes(t.id) ? "var(--gold)" : undefined }, disabled: diggingTrackIds.includes(t.id), onClick: () => digTrackFromSearch(t) }, diggingTrackIds.includes(t.id) ? "🔥 Added" : "🔥"),
                             React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, disabled: queuedTrackIds.includes(t.id), onClick: () => queueTrackFromSearch(t) }, queuedTrackIds.includes(t.id) ? "Queued" : "+ Queue")),
                         expandedTrackId === t.id && React.createElement(SongPreviewFrame, { trackId: t.id }));
                 }))),
@@ -2117,29 +2168,41 @@ function DiggingTab({ session, onOpenArtist, refreshToken }) {
     if (artistsLoading || songsLoading) return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…"));
 
     return (React.createElement("div", null,
-        React.createElement("label", { style: { marginTop: 14, display: "block" } }, "Artists"),
-        artistRows.length === 0
-            ? React.createElement("div", { style: { color: "var(--text-faint)", fontSize: 12.5, fontStyle: "italic", marginTop: 6 } }, "No artists marked as Digging yet — hit 🔥 on an artist's page or card.")
-            : artistRows.map(r => (React.createElement("div", { className: "log-row", key: r.id },
-                r.artists.image_url ? React.createElement("img", { src: r.artists.image_url, alt: "", onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
-                React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => onOpenArtist(shimArtistFromRow(r.artists)) },
-                    React.createElement("div", { className: "log-row-title" }, r.artists.name)),
-                React.createElement(ShareButton, { title: r.artists.name, text: `Digging ${r.artists.name} right now`, url: r.artists.spotify_url || "", session, shareType: "artist", itemId: r.artists.spotify_id }),
-                React.createElement("button", { className: "remove-btn", onClick: () => removeDiggingArtist(r.id) }, React.createElement(IconX, { size: 13 }))))),
+        React.createElement("div", { className: "checkout-section" },
+            React.createElement("div", { className: "checkout-heading" },
+                "Artists",
+                artistRows.length > 0 && React.createElement("span", { className: "checkout-count" }, artistRows.length)),
+            artistRows.length === 0
+                ? React.createElement("div", { className: "checkout-empty" }, "Nothing here yet — hit 🔥 on an artist to add them to your Need to Check Out list.")
+                : artistRows.map(r => (React.createElement("div", { className: "checkout-row", key: r.id },
+                    r.artists.image_url
+                        ? React.createElement("img", { src: r.artists.image_url, alt: "", onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } })
+                        : React.createElement("div", { className: "checkout-row-art-fallback", onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } }, "♪"),
+                    React.createElement("div", { style: { flex: 1, cursor: "pointer", minWidth: 0 }, onClick: () => onOpenArtist(shimArtistFromRow(r.artists)) },
+                        React.createElement("div", { className: "checkout-row-title" }, r.artists.name)),
+                    React.createElement("div", { className: "checkout-row-actions" },
+                        React.createElement(ShareButton, { title: r.artists.name, text: `Want to check out ${r.artists.name}`, url: r.artists.spotify_url || "", session, shareType: "artist", itemId: r.artists.spotify_id }),
+                        React.createElement("button", { className: "remove-btn", onClick: () => removeDiggingArtist(r.id), title: "Remove from Need to Check Out" }, React.createElement(IconX, { size: 13 })))))),
 
-        React.createElement("label", { style: { marginTop: 22, display: "block" } }, "Songs"),
-        songs.length === 0
-            ? React.createElement("div", { style: { color: "var(--text-faint)", fontSize: 12.5, fontStyle: "italic", marginTop: 6 } }, "No songs marked as Digging yet — hit 🔥 next to a song in an artist's page or Search.")
-            : songs.map(s => (React.createElement(React.Fragment, { key: s.id },
-                React.createElement("div", { className: "log-row" },
-                    s.album_art_url ? React.createElement("img", { src: s.album_art_url, alt: "", style: { width: 40, height: 40 } }) : React.createElement("div", { style: { width: 40, height: 40, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
-                    React.createElement("div", { style: { flex: 1, cursor: s.artists ? "pointer" : "default" }, onClick: () => s.artists && onOpenArtist(shimArtistFromRow(s.artists)) },
-                        React.createElement("div", { className: "log-row-title" }, s.track_name),
-                        React.createElement("div", { className: "log-row-meta" }, s.artists ? s.artists.name : "")),
-                    React.createElement(SongPreviewToggle, { trackId: s.spotify_track_id, expanded: expandedTrackId === s.id, onToggle: () => setExpandedTrackId(expandedTrackId === s.id ? null : s.id) }),
-                    React.createElement(ShareButton, { title: s.track_name, text: `Digging "${s.track_name}"${s.artists ? " by " + s.artists.name : ""} right now`, url: `https://open.spotify.com/track/${s.spotify_track_id}`, session, shareType: "track", itemId: s.spotify_track_id, artist: s.artists ? s.artists.name : "" }),
-                    React.createElement("button", { className: "remove-btn", onClick: () => removeDiggingSong(s.id) }, React.createElement(IconX, { size: 13 }))),
-                expandedTrackId === s.id && React.createElement(SongPreviewFrame, { trackId: s.spotify_track_id }))))));
+        React.createElement("div", { className: "checkout-section" },
+            React.createElement("div", { className: "checkout-heading" },
+                "Songs",
+                songs.length > 0 && React.createElement("span", { className: "checkout-count" }, songs.length)),
+            songs.length === 0
+                ? React.createElement("div", { className: "checkout-empty" }, "Nothing here yet — hit 🔥 next to a song to add it to your Need to Check Out list.")
+                : songs.map(s => (React.createElement(React.Fragment, { key: s.id },
+                    React.createElement("div", { className: "checkout-row" },
+                        s.album_art_url
+                            ? React.createElement("img", { src: s.album_art_url, alt: "", onClick: () => s.artists && onOpenArtist(shimArtistFromRow(s.artists)), style: { cursor: s.artists ? "pointer" : "default" } })
+                            : React.createElement("div", { className: "checkout-row-art-fallback" }, "♪"),
+                        React.createElement("div", { style: { flex: 1, cursor: s.artists ? "pointer" : "default", minWidth: 0 }, onClick: () => s.artists && onOpenArtist(shimArtistFromRow(s.artists)) },
+                            React.createElement("div", { className: "checkout-row-title" }, s.track_name),
+                            React.createElement("div", { className: "checkout-row-meta" }, s.artists ? s.artists.name : "")),
+                        React.createElement("div", { className: "checkout-row-actions" },
+                            React.createElement(SongPreviewToggle, { trackId: s.spotify_track_id, expanded: expandedTrackId === s.id, onToggle: () => setExpandedTrackId(expandedTrackId === s.id ? null : s.id) }),
+                            React.createElement(ShareButton, { title: s.track_name, text: `Want to check out "${s.track_name}"${s.artists ? " by " + s.artists.name : ""}`, url: `https://open.spotify.com/track/${s.spotify_track_id}`, session, shareType: "track", itemId: s.spotify_track_id, artist: s.artists ? s.artists.name : "" }),
+                            React.createElement("button", { className: "remove-btn", onClick: () => removeDiggingSong(s.id), title: "Remove from Need to Check Out" }, React.createElement(IconX, { size: 13 })))),
+                    expandedTrackId === s.id && React.createElement(SongPreviewFrame, { trackId: s.spotify_track_id }))))))));
 }
 
 // Randomnator — pick a seed (an artist, or a specific song), pick what kind of
@@ -2177,12 +2240,20 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
     const [loading, setLoading] = useState(false);
     const [msg, setMsg] = useState("");
     const [addedIds, setAddedIds] = useState([]);
+    const [diggedIds, setDiggedIds] = useState([]);
     const [removedKeys, setRemovedKeys] = useState([]);
     const [expandedKey, setExpandedKey] = useState(null);
     const [artistTopTrack, setArtistTopTrack] = useState({});
     // Artists you've already hit ☠ "not for me" on, anywhere in the app — kept as
     // lowercased names (not just spotify_id) so a result gets filtered out the
     // moment it's resolved, before we'd otherwise spend a Spotify lookup on it.
+    // Artists to never resurface as a Randomnator suggestion: both ones you've
+    // hit ☠ "not for me" on AND ones you've already rated/added to My Artists —
+    // the whole point of Randomnator is to surface new stuff, so an artist
+    // that's already living on your My Artists page shouldn't keep coming back
+    // here (you can still pull them up again by searching for them directly).
+    // Kept as lowercased names so a result gets filtered before spending a
+    // Spotify lookup on it.
     const [excludedNames, setExcludedNames] = useState(new Set());
     // Names already shown for the CURRENT seed (any past Randomize click, not just
     // the visible batch) — without this, hitting Randomize again just returns the
@@ -2197,7 +2268,7 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
                 .from("user_artist_ratings")
                 .select("artists:artist_id (name)")
                 .eq("user_id", session.user.id)
-                .eq("status", "excluded");
+                .in("status", ["excluded", "rated"]);
             if (cancelled) return;
             setExcludedNames(new Set((data || []).map(r => r.artists && r.artists.name && r.artists.name.trim().toLowerCase()).filter(Boolean)));
         })();
@@ -2264,6 +2335,7 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
         setMsg("");
         setResults([]);
         setAddedIds([]);
+        setDiggedIds([]);
         setRemovedKeys([]);
         try {
             // Shuffled so repeat Randomize clicks don't just hand back the same
@@ -2358,6 +2430,31 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
         try {
             await quickFavoriteArtist(r.spotifyArtist, session.user.id);
             setAddedIds(prev => [...prev, r.key]);
+            // Same reasoning as notForMeArtist below — don't wait on a re-fetch to
+            // stop suggesting an artist you just added to My Artists.
+            setExcludedNames(prev => new Set([...prev, (r.name || r.spotifyArtist.name || "").trim().toLowerCase()]));
+            onChanged && onChanged();
+        } catch (e) { setMsg(e.message); }
+    }
+    // "Check it out later" (the Need to Check Out tab) — for a Randomnator result
+    // you're not ready to rate yet but don't want to lose either. Separate from
+    // addArtistResult/addSongResult below (My Artists / My Songs), since those are
+    // for something you're actually rating now.
+    async function digArtistResult(r) {
+        try {
+            await toggleDigArtist(r.spotifyArtist, session.user.id, false);
+            setDiggedIds(prev => [...prev, r.key]);
+            onChanged && onChanged();
+        } catch (e) { setMsg(e.message); }
+    }
+    async function digSongResult(r) {
+        try {
+            const spotifyArtist = await resolveArtistByName(r.artistName || (r.track.artists[0] && r.track.artists[0].name) || "");
+            const row = spotifyArtist ? await ensureArtistRow(spotifyArtist) : null;
+            const art = (r.track.album && r.track.album.images && r.track.album.images[0] && r.track.album.images[0].url) || null;
+            const { error: err } = await bandDumpDb.from("digging_songs").insert({ user_id: session.user.id, artist_id: row ? row.id : null, spotify_track_id: r.track.id, track_name: r.track.name, album_art_url: art });
+            if (err && err.code !== "23505") { setMsg(err.message); return; }
+            setDiggedIds(prev => [...prev, r.key]);
             onChanged && onChanged();
         } catch (e) { setMsg(e.message); }
     }
@@ -2462,6 +2559,7 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
                         React.createElement("div", { className: "log-row-title" }, r.name),
                         React.createElement("div", { className: "log-row-meta" }, `similar to ${seed.name}`)),
                     React.createElement("button", { className: "ghost", style: { padding: "5px 8px", fontSize: 11.5 }, onClick: () => toggleArtistPreview(r), title: expandedKey === r.key ? "Hide player" : "Play their top song" }, expandedKey === r.key ? "✕" : "▶"),
+                    React.createElement("button", { className: `dig-btn ${diggedIds.includes(r.key) ? "digging" : ""}`, disabled: diggedIds.includes(r.key), onClick: () => digArtistResult(r), title: "Check out later" }, diggedIds.includes(r.key) ? "🔥 Added" : "🔥"),
                     React.createElement("button", { className: `fav-heart-btn ${addedIds.includes(r.key) ? "favorited" : ""}`, style: { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12 }, onClick: () => addArtistResult(r), title: "Add to My Artists" }, React.createElement(IconBolt, { size: 14, filled: addedIds.includes(r.key) }), addedIds.includes(r.key) ? "Added" : "My Artists"),
                     React.createElement("button", { className: "exclude-btn", onClick: () => notForMeArtist(r), title: "Not for me — never suggest again" }, React.createElement(IconExclude, { size: 22 }))),
                 expandedKey === r.key && (artistTopTrack[r.key]
@@ -2476,6 +2574,7 @@ function MusicRandomnatorTab({ session, onOpenArtist, onChanged }) {
                         React.createElement("div", { className: "log-row-title" }, r.track.name),
                         React.createElement("div", { className: "log-row-meta" }, `${r.artistName || (r.track.artists[0] && r.track.artists[0].name) || ""} · similar to ${seed.name}`)),
                     React.createElement(SongPreviewToggle, { trackId: r.track.id, expanded: expandedKey === r.key, onToggle: () => setExpandedKey(expandedKey === r.key ? null : r.key) }),
+                    React.createElement("button", { className: `dig-btn ${diggedIds.includes(r.key) ? "digging" : ""}`, disabled: diggedIds.includes(r.key), onClick: () => digSongResult(r), title: "Check out later" }, diggedIds.includes(r.key) ? "🔥 Added" : "🔥"),
                     React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: addedIds.includes(r.key) ? "var(--gold)" : undefined }, onClick: () => addSongResult(r), title: "Add to My Songs" }, addedIds.includes(r.key) ? "Added" : "+ My Songs"),
                     React.createElement("button", { className: "exclude-btn", onClick: () => notForMeSong(r), title: "Not for me" }, React.createElement(IconExclude, { size: 22 }))),
                 expandedKey === r.key && React.createElement(SongPreviewFrame, { trackId: r.track.id })))));
@@ -2500,7 +2599,7 @@ function MusicApp({ session, onRequireLogin }) {
             React.createElement("button", { className: `tab ${musicTab === "discover" ? "active" : ""}`, onClick: () => setMusicTab("discover") }, "Search"),
             React.createElement("button", { className: `tab ${musicTab === "my-artists" ? "active" : ""}`, onClick: () => setMusicTab("my-artists") }, "My Artists"),
             React.createElement("button", { className: `tab ${musicTab === "my-songs" ? "active" : ""}`, onClick: () => setMusicTab("my-songs") }, "My Songs"),
-            React.createElement("button", { className: `tab ${musicTab === "digging" ? "active" : ""}`, onClick: () => setMusicTab("digging") }, "Digging"),
+            React.createElement("button", { className: `tab ${musicTab === "digging" ? "active" : ""}`, onClick: () => setMusicTab("digging") }, "Need to Check Out"),
             React.createElement("button", { className: `tab ${musicTab === "queue" ? "active" : ""}`, onClick: () => setMusicTab("queue") }, "Queue"),
             React.createElement("button", { className: `tab ${musicTab === "spin" ? "active" : ""}`, onClick: () => setMusicTab("spin") }, "Randomnator")),
         musicTab === "discover" && React.createElement(MusicDiscoverTab, { onOpenArtist: setOpenArtist, session, onChanged: () => setRefreshToken(t => t + 1) }),
