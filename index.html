@@ -848,13 +848,26 @@ const MUSIC_GENRES = [
 // function (no secret to protect). It asks callers to rate-limit to ~1 req/sec per IP,
 // which per-browser calls satisfy for free since each user hits it from their own IP,
 // and it also asks for a descriptive User-Agent identifying the app — browsers don't
-// let JS set that header, so requests here just look like generic browser traffic;
-// that's a known limitation of calling it client-side, not a bug. Not yet live-tested
-// against the real API from inside this environment (this sandbox's own network is
-// allowlisted to a fixed set of hosts that doesn't include musicbrainz.org) — worth
-// trying "Dallas" once deployed and flagging back if results look off or MusicBrainz
-// starts erroring/blocking.
+// let JS set that header, so requests here just look like generic browser traffic.
+// Confirmed live 2026-09-15: both City and Producer search were coming back
+// `MusicBrainz search failed (503)` on the very first try — MusicBrainz's public
+// service is known to 503 ("Your requests are being throttled") when it doesn't see a
+// descriptive User-Agent, and City/Producer between them can fire 2 requests within
+// a second (Producer looks up the artist, then fetches their credits right after) —
+// either is enough to trip their limiter even for a single search. Retry with backoff
+// on 503 the same way `bandDumpCallFn` already does for Spotify's 429s, and add a
+// deliberate pause between back-to-back MusicBrainz calls in the same action.
 const MUSICBRAINZ_ARTIST_URL = "https://musicbrainz.org/ws/2/artist/";
+async function musicbrainzFetchJson(url, retries = 3) {
+    const res = await fetch(url);
+    if (res.status === 503 && retries > 0) {
+        const retryAfter = parseFloat(res.headers.get("Retry-After")) || 0;
+        await sleep(Math.max(retryAfter * 1000, 1200) + Math.random() * 500);
+        return musicbrainzFetchJson(url, retries - 1);
+    }
+    if (!res.ok) throw new Error(`MusicBrainz search failed (${res.status})`);
+    return res.json();
+}
 async function musicbrainzArtistsByCity(cityNames, limit = 60) {
     // Search both `area` (the artist's general associated area) and `beginarea`
     // (specifically where a group formed / a person was born) since MusicBrainz
@@ -862,9 +875,7 @@ async function musicbrainzArtistsByCity(cityNames, limit = 60) {
     const esc = s => s.replace(/["\\]/g, "");
     const clauses = cityNames.flatMap(c => [`area:"${esc(c)}"`, `beginarea:"${esc(c)}"`]);
     const query = encodeURIComponent(`(${clauses.join(" OR ")})`);
-    const res = await fetch(`${MUSICBRAINZ_ARTIST_URL}?query=${query}&fmt=json&limit=${limit}`);
-    if (!res.ok) throw new Error(`MusicBrainz search failed (${res.status})`);
-    const data = await res.json();
+    const data = await musicbrainzFetchJson(`${MUSICBRAINZ_ARTIST_URL}?query=${query}&fmt=json&limit=${limit}`);
     return data.artists || [];
 }
 
@@ -894,9 +905,7 @@ function citiesForCityQuery(q) {
 async function musicbrainzFindArtistId(name) {
     const esc = s => s.replace(/["\\]/g, "");
     const q = encodeURIComponent(`artist:"${esc(name)}"`);
-    const res = await fetch(`${MUSICBRAINZ_ARTIST_URL}?query=${q}&fmt=json&limit=5`);
-    if (!res.ok) throw new Error(`MusicBrainz artist search failed (${res.status})`);
-    const data = await res.json();
+    const data = await musicbrainzFetchJson(`${MUSICBRAINZ_ARTIST_URL}?query=${q}&fmt=json&limit=5`);
     const items = data.artists || [];
     if (!items.length) return null;
     const target = name.trim().toLowerCase();
@@ -906,12 +915,14 @@ async function musicbrainzFindArtistId(name) {
 async function musicbrainzProducerCredits(producerName, limit = 50) {
     const mbid = await musicbrainzFindArtistId(producerName);
     if (!mbid) return [];
+    // A deliberate pause before the second MusicBrainz call in this same search —
+    // back-to-back requests with no gap is exactly what was tripping their ~1 req/sec
+    // limiter (confirmed live 2026-09-15).
+    await sleep(1100);
     // recording-rels: this artist's direct relationships to recordings (includes the
     // "producer" relation type); artist-credits: embeds the recording's own performing
     // artist name so results can show/resolve "Song — Artist", not just a bare title.
-    const res = await fetch(`https://musicbrainz.org/ws/2/artist/${mbid}?inc=recording-rels+artist-credits&fmt=json`);
-    if (!res.ok) throw new Error(`MusicBrainz credit lookup failed (${res.status})`);
-    const data = await res.json();
+    const data = await musicbrainzFetchJson(`https://musicbrainz.org/ws/2/artist/${mbid}?inc=recording-rels+artist-credits&fmt=json`);
     const rels = (data.relations || []).filter(r => r.type === "producer" && r.recording && r.recording.id);
     const byId = new Map();
     for (const r of rels) {
