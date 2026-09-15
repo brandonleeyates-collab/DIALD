@@ -2086,21 +2086,20 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                     return { name: a.name, area: "", spotifyArtist: null };
                 }
             });
-            // Brandon's feedback 2026-09-15: searching "Dallas" came back almost entirely
-            // Fort Worth bands, buried under names nobody's heard of. Metro grouping is
-            // still the point (Fort Worth SHOULD show up under a Dallas search, just
-            // clearly noted via the area subtitle) — but the artists actually FROM the
-            // searched city should lead the list, and within each group the more-followed
-            // (i.e. more recognizable) artists should surface before obscure ones, instead
-            // of sorting purely by MusicBrainz's text-relevance score.
-            const searchedLower = searchedCity.toLowerCase();
-            const isSearchedCity = area => !!area && area.toLowerCase().includes(searchedLower);
+            // Brandon's feedback 2026-09-15, then again 2026-09-16: the first pass here
+            // tried leading with the literally-searched city and only sorting by
+            // popularity as a tiebreaker within that group — still came back Fort Worth-
+            // heavy on a Dallas search, most likely because MusicBrainz's area/begin-area
+            // tagging is inconsistent (plenty of real Dallas acts are tagged "Texas" or
+            // "United States" instead of the city itself, so they were losing the
+            // city-match tiebreak entirely). Brandon's actual ask, stated plainly: "Most
+            // popular artists should always be first on these lists" — so drop the
+            // city-match tier and sort purely by Spotify follower count. Fort Worth bands
+            // still show up (metro grouping is still wanted, and the area subtitle still
+            // labels where each one's from), they just no longer get artificially bumped
+            // above better-known Dallas acts by an unreliable area-string match.
             const followerCount = entry => (entry.spotifyArtist && entry.spotifyArtist.followers && entry.spotifyArtist.followers.total) || 0;
-            const sorted = resolved.slice().sort((a, b) => {
-                const primaryDiff = (isSearchedCity(b.area) ? 1 : 0) - (isSearchedCity(a.area) ? 1 : 0);
-                if (primaryDiff !== 0) return primaryDiff;
-                return followerCount(b) - followerCount(a);
-            });
+            const sorted = resolved.slice().sort((a, b) => followerCount(b) - followerCount(a));
             setCityResults(sorted);
         } catch (e2) {
             setCityError(e2.message || "Couldn't reach MusicBrainz.");
