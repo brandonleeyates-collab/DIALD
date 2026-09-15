@@ -744,6 +744,35 @@ async function mapWithConcurrency(items, limit, fn) {
     await Promise.all(new Array(Math.min(limit, items.length)).fill(0).map(worker));
     return results;
 }
+
+// Spotify's catalog often returns several distinct artist IDs that share (or
+// nearly share) an exact name — tribute/cover acts, mislabeled duplicate
+// uploads, bare-stub entries with no photo, genres, or followers — mixed in
+// right alongside the real band. Searching "Widespread Panic" is a real
+// example: the actual band plus 2-3 blank duplicate "Widespread Panic"
+// entries and a "The Q People 'Widespread Panic'" cover act, all in one
+// 10-result page. Left alone this clutters the search grid with lookalike
+// cards and can push the real artist out of a short autocomplete list
+// entirely. This collapses same-name entries down to the single best one
+// (prefer whichever has a photo/genres/followers, then higher popularity),
+// then drops any remaining zero-signal stub entries — unless that would
+// leave nothing, in which case the stubs are kept so a real but sparse
+// artist page still shows up.
+function cleanArtistResults(items) {
+    const byName = new Map();
+    for (const a of (items || [])) {
+        if (!a || !a.name) continue;
+        const key = a.name.trim().toLowerCase();
+        const signal = (a.images && a.images.length ? 1 : 0) + (a.genres && a.genres.length ? 1 : 0) + (a.followers && a.followers.total > 0 ? 1 : 0);
+        const prev = byName.get(key);
+        if (!prev || signal > prev.signal || (signal === prev.signal && (a.popularity || 0) > (prev.item.popularity || 0))) {
+            byName.set(key, { item: a, signal });
+        }
+    }
+    const deduped = Array.from(byName.values());
+    const withSignal = deduped.filter(x => x.signal > 0).map(x => x.item);
+    return withSignal.length > 0 ? withSignal : deduped.map(x => x.item);
+}
 const spotifySearchArtists = (q, limit = 10) => bandDumpCallFn("spotify-proxy", { action: "search", type: "artist", q, limit });
 const spotifySearchTracks = (q, limit = 10, offset = 0) => bandDumpCallFn("spotify-proxy", { action: "search", type: "track", q, limit, offset });
 const lastfmSimilarArtists = (artist, limit = 10) => bandDumpCallFn("lastfm-proxy", { action: "similar-artists", artist, limit });
@@ -793,12 +822,116 @@ const spotifyTopSongsFallback = async (artistName, artistId, limit = 10) => {
 
 // Curated tag list for genre browsing — Last.fm's own tag list is user-generated
 // and noisy, so we stick to well-known genres its tag.gettopartists understands.
+// A handful of these ("rock", "metal", "pop", "hip hop", "electronic",
+// "country") are broad enough that Browse by Genre buries the artist you
+// actually want under everything else that fits the umbrella term — so the
+// biggest categories also get their common subgenres listed as their own
+// pills, right alongside the parent tag rather than replacing it. These are
+// all real Last.fm tags, same as the originals.
 const MUSIC_GENRES = [
-    "rock", "pop", "hip hop", "indie", "indie rock", "indie pop", "alternative rock",
-    "electronic", "house", "techno", "ambient", "metal", "punk", "jazz", "classical",
-    "country", "folk", "singer-songwriter", "r&b", "soul", "funk", "reggae",
-    "blues", "k-pop", "latin", "grunge",
+    "rock", "classic rock", "hard rock", "soft rock", "yacht rock", "punk rock",
+    "prog rock", "psychedelic rock", "garage rock", "southern rock", "folk rock",
+    "glam rock", "indie rock", "alternative rock", "grunge",
+    "metal", "heavy metal", "thrash metal", "death metal", "black metal", "doom metal", "nu metal",
+    "pop", "synth-pop", "dream pop", "dance pop", "britpop", "indie pop", "k-pop",
+    "hip hop", "trap", "boom bap", "conscious hip hop",
+    "electronic", "house", "techno", "ambient", "edm", "drum and bass", "dubstep", "trance", "synthwave",
+    "country", "outlaw country", "country pop", "bluegrass", "americana",
+    "indie", "punk", "jazz", "classical", "folk", "singer-songwriter",
+    "r&b", "soul", "neo soul", "funk", "reggae", "blues", "latin",
 ];
+
+// City/metro browse — MusicBrainz is the only one of Spotify/Last.fm/MusicBrainz that
+// tracks where a band is actually FROM (its "area"/"begin-area" fields) — Spotify and
+// Last.fm have no hometown data at all. MusicBrainz's web service needs no API key and
+// serves CORS, so it's called directly from the browser rather than through an edge
+// function (no secret to protect). It asks callers to rate-limit to ~1 req/sec per IP,
+// which per-browser calls satisfy for free since each user hits it from their own IP,
+// and it also asks for a descriptive User-Agent identifying the app — browsers don't
+// let JS set that header, so requests here just look like generic browser traffic;
+// that's a known limitation of calling it client-side, not a bug. Not yet live-tested
+// against the real API from inside this environment (this sandbox's own network is
+// allowlisted to a fixed set of hosts that doesn't include musicbrainz.org) — worth
+// trying "Dallas" once deployed and flagging back if results look off or MusicBrainz
+// starts erroring/blocking.
+const MUSICBRAINZ_ARTIST_URL = "https://musicbrainz.org/ws/2/artist/";
+async function musicbrainzArtistsByCity(cityNames, limit = 60) {
+    // Search both `area` (the artist's general associated area) and `beginarea`
+    // (specifically where a group formed / a person was born) since MusicBrainz
+    // entries are tagged inconsistently between the two.
+    const esc = s => s.replace(/["\\]/g, "");
+    const clauses = cityNames.flatMap(c => [`area:"${esc(c)}"`, `beginarea:"${esc(c)}"`]);
+    const query = encodeURIComponent(`(${clauses.join(" OR ")})`);
+    const res = await fetch(`${MUSICBRAINZ_ARTIST_URL}?query=${query}&fmt=json&limit=${limit}`);
+    if (!res.ok) throw new Error(`MusicBrainz search failed (${res.status})`);
+    const data = await res.json();
+    return data.artists || [];
+}
+
+// A handful of Texas metro areas grouped together so searching "Dallas" also catches
+// Fort Worth/Denton/etc bands — MusicBrainz only matches the exact city an artist is
+// tagged with, so without this a metro search would miss most of the actual area. Add
+// more cities to a group, or more groups, any time; anything typed that isn't in this
+// list falls back to a plain exact-city MusicBrainz search instead of a metro one.
+const CITY_METRO_GROUPS = {
+    "dallas": ["Dallas", "Fort Worth", "Denton", "Arlington", "Plano", "Irving", "Grand Prairie", "McKinney", "Frisco", "Garland", "DFW"],
+    "fort worth": ["Dallas", "Fort Worth", "Denton", "Arlington", "Plano", "Irving", "Grand Prairie", "McKinney", "Frisco", "Garland", "DFW"],
+    "dfw": ["Dallas", "Fort Worth", "Denton", "Arlington", "Plano", "Irving", "Grand Prairie", "McKinney", "Frisco", "Garland", "DFW"],
+    "austin": ["Austin", "Round Rock", "San Marcos", "Georgetown"],
+    "houston": ["Houston", "The Woodlands", "Sugar Land", "Pasadena", "Katy"],
+    "san antonio": ["San Antonio", "New Braunfels"],
+};
+function citiesForCityQuery(q) {
+    const key = q.trim().toLowerCase();
+    return CITY_METRO_GROUPS[key] || [q.trim()];
+}
+
+// Producer search — another MusicBrainz-only fact, and a step further out than City:
+// production credits are community-added per-recording relationships (Recording ↔
+// Artist, relationship type "producer"), so a real producer can come back with very
+// few or zero credits if nobody's logged their work yet, independent of how big their
+// actual discography is. Same not-yet-live-tested caveat as City search above.
+async function musicbrainzFindArtistId(name) {
+    const esc = s => s.replace(/["\\]/g, "");
+    const q = encodeURIComponent(`artist:"${esc(name)}"`);
+    const res = await fetch(`${MUSICBRAINZ_ARTIST_URL}?query=${q}&fmt=json&limit=5`);
+    if (!res.ok) throw new Error(`MusicBrainz artist search failed (${res.status})`);
+    const data = await res.json();
+    const items = data.artists || [];
+    if (!items.length) return null;
+    const target = name.trim().toLowerCase();
+    const exact = items.find(a => a.name && a.name.trim().toLowerCase() === target);
+    return (exact || items[0]).id;
+}
+async function musicbrainzProducerCredits(producerName, limit = 50) {
+    const mbid = await musicbrainzFindArtistId(producerName);
+    if (!mbid) return [];
+    // recording-rels: this artist's direct relationships to recordings (includes the
+    // "producer" relation type); artist-credits: embeds the recording's own performing
+    // artist name so results can show/resolve "Song — Artist", not just a bare title.
+    const res = await fetch(`https://musicbrainz.org/ws/2/artist/${mbid}?inc=recording-rels+artist-credits&fmt=json`);
+    if (!res.ok) throw new Error(`MusicBrainz credit lookup failed (${res.status})`);
+    const data = await res.json();
+    const rels = (data.relations || []).filter(r => r.type === "producer" && r.recording && r.recording.id);
+    const byId = new Map();
+    for (const r of rels) {
+        const rec = r.recording;
+        if (byId.has(rec.id)) continue;
+        const artistName = ((rec["artist-credit"] || []).map(c => c.name).filter(Boolean).join(", ")) || "";
+        byId.set(rec.id, { title: rec.title, artistName });
+    }
+    return Array.from(byId.values()).slice(0, limit);
+}
+async function resolveProducerCreditToSpotify(credit) {
+    try {
+        const q = credit.artistName ? `track:"${credit.title}" artist:"${credit.artistName}"` : credit.title;
+        const data = await spotifySearchTracks(q, 3);
+        const items = (data.tracks && data.tracks.items) || [];
+        return items[0] || null;
+    } catch (e) {
+        return null;
+    }
+}
 
 function stripHtml(s) {
     return (s || "").replace(/<[^>]*>/g, "").trim();
@@ -1524,15 +1657,19 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                 bio && React.createElement("p", { className: "artist-bio" }, bio.length > 320 ? bio.slice(0, 320) + "…" : bio),
                 error && React.createElement("div", { style: { color: "var(--danger)", fontSize: 12.5, marginTop: 10 } }, error),
                 React.createElement("label", null, "Rating"),
-                (status === "rated" && !editingRating)
-                    ? React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginTop: 4 } },
-                        React.createElement("span", { style: { fontSize: 22, fontWeight: 800, color: "var(--gold)" } }, Number(rating).toFixed(1)),
-                        React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, onClick: () => setEditingRating(true) }, "Change rating"))
-                    : React.createElement(RatingButtons, { value: rating, onChange: setRating }),
+                editingRating
+                    ? React.createElement(RatingButtons, { value: rating, onChange: setRating })
+                    : (status === "rated"
+                        ? React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10, marginTop: 4 } },
+                            React.createElement("span", { style: { fontSize: 22, fontWeight: 800, color: "var(--gold)" } }, Number(rating).toFixed(1)),
+                            React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, onClick: () => setEditingRating(true) }, "Change rating"))
+                        // Not rated yet: keep the 1-10 grid hidden behind a "Rate" button instead
+                        // of dropping the full number grid on you the instant the artist opens.
+                        : React.createElement("button", { className: "ghost", style: { marginTop: 4 }, onClick: () => setEditingRating(true) }, "Rate")),
                 React.createElement("label", null, "Notes"),
                 React.createElement("textarea", { value: notes, onChange: e => setNotes(e.target.value), rows: 2, style: { width: "100%", background: "var(--bg-raised-2)", border: "1px solid var(--divider)", borderRadius: "var(--radius-sm)", color: "var(--text)", padding: 8, fontFamily: "inherit", fontSize: 13 } }),
                 React.createElement("div", { className: "modal-actions" },
-                    (status !== "rated" || editingRating) && React.createElement("button", { className: "primary", onClick: saveRating }, status === "rated" ? "Update rating" : "Save rating"),
+                    editingRating && React.createElement("button", { className: "primary", onClick: saveRating }, status === "rated" ? "Update rating" : "Save rating"),
                     React.createElement("button", { className: "ghost", onClick: addToQueue, disabled: status === "queued" }, status === "queued" ? "In queue" : "Add to queue")),
                 saveMsg && React.createElement("div", { style: { color: "var(--sage)", fontSize: 12, marginTop: 6 } }, saveMsg),
 
@@ -1638,13 +1775,24 @@ function MusicAutocompleteDropdown({ query, onPick, enabled, closeSignal }) {
         if (!enabled) { setOpen(false); return; }
         if (!debouncedQuery || debouncedQuery.trim().length < 2) { setSuggestions([]); setOpen(false); return; }
         let cancelled = false;
+        const q = debouncedQuery.trim().toLowerCase();
         spotifySearchArtists(debouncedQuery.trim(), 10)
             .then(data => {
                 if (cancelled) return;
-                const list = ((data.artists && data.artists.items) || [])
-                    .slice()
-                    .sort((a, b) => a.name.localeCompare(b.name))
-                    .slice(0, 4);
+                // Was: alphabetize the raw 10 results then take the first 4 — that
+                // discards Spotify's own relevance ranking and can cut the artist
+                // you're actually typing entirely (e.g. "Widespread Panic" sorting
+                // past several other same-genre jam bands starting with earlier
+                // letters). Now: dedupe lookalike/duplicate entries, put exact
+                // prefix matches first (still in Spotify's relevance order within
+                // that group), keep everything else after in relevance order, and
+                // show more of the list since the dropdown already scrolls.
+                const cleaned = cleanArtistResults((data.artists && data.artists.items) || []);
+                const list = cleaned
+                    .map((a, i) => ({ a, i, prefix: a.name.trim().toLowerCase().startsWith(q) }))
+                    .sort((x, y) => (y.prefix - x.prefix) || (x.i - y.i))
+                    .slice(0, 8)
+                    .map(x => x.a);
                 setSuggestions(list);
                 setOpen(list.length > 0);
             })
@@ -1689,6 +1837,43 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
     const [genreLoading, setGenreLoading] = useState(false);
     const [genreError, setGenreError] = useState("");
 
+    const [cityQuery, setCityQuery] = useState("");
+    const [cityResults, setCityResults] = useState([]);
+    const [cityLoading, setCityLoading] = useState(false);
+    const [cityError, setCityError] = useState("");
+    const [citySearchedFor, setCitySearchedFor] = useState(null);
+
+    // Producer results are plain Spotify track objects (once resolved), so they reuse
+    // the same track-id-keyed state and handlers as the Songs search mode below
+    // (queuedTrackIds, diggingTrackIds, expandedTrackId, openTrackArtist,
+    // queueTrackFromSearch, digTrackFromSearch) instead of duplicating them.
+    const [producerQuery, setProducerQuery] = useState("");
+    const [producerResults, setProducerResults] = useState([]);
+    const [producerLoading, setProducerLoading] = useState(false);
+    const [producerError, setProducerError] = useState("");
+    const [producerSearchedFor, setProducerSearchedFor] = useState(null);
+
+    // Names you've already liked or excluded — Genre browse is a discovery
+    // surface (like Randomnator), so once you've made a call on an artist it
+    // shouldn't keep resurfacing there. A name you actually type into Search
+    // still finds it (so you can reopen/re-rate something), this only hides
+    // already-decided artists from the browse-by-genre grid.
+    const [handledNames, setHandledNames] = useState(new Set());
+    useEffect(() => {
+        if (!session) return;
+        let cancelled = false;
+        (async () => {
+            const { data } = await bandDumpDb
+                .from("user_artist_ratings")
+                .select("artists:artist_id (name)")
+                .eq("user_id", session.user.id)
+                .in("status", ["excluded", "rated"]);
+            if (cancelled) return;
+            setHandledNames(new Set((data || []).map(r => r.artists && r.artists.name && r.artists.name.trim().toLowerCase()).filter(Boolean)));
+        })();
+        return () => { cancelled = true; };
+    }, [session]);
+
     async function doSearch(e) {
         if (e) e.preventDefault();
         if (!query.trim()) return;
@@ -1697,7 +1882,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
         setCloseSignal(t => t + 1);
         try {
             const data = await spotifySearchArtists(query.trim(), 10);
-            setResults((data.artists && data.artists.items) || []);
+            setResults(cleanArtistResults((data.artists && data.artists.items) || []));
         } catch (e2) {
             setError(e2.message || "Couldn't reach Spotify.");
         } finally {
@@ -1839,6 +2024,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
             const row = await quickFavoriteArtist(entry.spotifyArtist, session.user.id);
             await attachGenreTag(row.id, selectedGenre);
             setFavoritedIds(prev => [...prev, entry.spotifyArtist.id]);
+            setHandledNames(prev => new Set([...prev, (entry.name || "").trim().toLowerCase()]));
             onChanged && onChanged();
         } catch (e2) { setGenreError(e2.message); }
     }
@@ -1849,6 +2035,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
             const row = await excludeArtist(entry.spotifyArtist, session.user.id);
             await attachGenreTag(row.id, selectedGenre);
             setExcludedIds(prev => [...prev, entry.spotifyArtist.id]);
+            setHandledNames(prev => new Set([...prev, (entry.name || "").trim().toLowerCase()]));
             onChanged && onChanged();
         } catch (e2) { setGenreError(e2.message); }
     }
@@ -1864,15 +2051,104 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
         } catch (e2) { setGenreError(e2.message); }
     }
 
+    async function doCitySearch(e) {
+        if (e) e.preventDefault();
+        if (!cityQuery.trim()) return;
+        setCityLoading(true);
+        setCityError("");
+        setCitySearchedFor(cityQuery.trim());
+        try {
+            const cities = citiesForCityQuery(cityQuery);
+            const hits = await musicbrainzArtistsByCity(cities, 60);
+            // MusicBrainz can return the same artist more than once across the
+            // matched cities/fields — dedupe by MBID, keep whichever hit scored higher.
+            const byId = new Map();
+            for (const a of hits) {
+                if (!a || !a.name || !a.id) continue;
+                const prev = byId.get(a.id);
+                if (!prev || (a.score || 0) > (prev.score || 0)) byId.set(a.id, a);
+            }
+            const unique = Array.from(byId.values()).sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 50);
+            const resolved = await mapWithConcurrency(unique, 4, async a => {
+                try {
+                    const spotifyArtist = await resolveArtistByName(a.name);
+                    const areaName = (a["begin-area"] && a["begin-area"].name) || (a.area && a.area.name) || "";
+                    return { name: a.name, area: areaName, spotifyArtist };
+                } catch (e2) {
+                    return { name: a.name, area: "", spotifyArtist: null };
+                }
+            });
+            setCityResults(resolved);
+        } catch (e2) {
+            setCityError(e2.message || "Couldn't reach MusicBrainz.");
+        } finally {
+            setCityLoading(false);
+        }
+    }
+    async function openCityArtist(entry) {
+        setCityError("");
+        if (!entry.spotifyArtist) { setCityError(`Couldn't find "${entry.name}" on Spotify.`); return; }
+        onOpenArtist(entry.spotifyArtist);
+    }
+    async function favoriteCityArtist(entry) {
+        setCityError("");
+        if (!entry.spotifyArtist) { setCityError(`Couldn't find "${entry.name}" on Spotify.`); return; }
+        try {
+            await quickFavoriteArtist(entry.spotifyArtist, session.user.id);
+            setFavoritedIds(prev => [...prev, entry.spotifyArtist.id]);
+            setHandledNames(prev => new Set([...prev, (entry.name || "").trim().toLowerCase()]));
+            onChanged && onChanged();
+        } catch (e2) { setCityError(e2.message); }
+    }
+    async function excludeCityArtist(entry) {
+        setCityError("");
+        if (!entry.spotifyArtist) { setCityError(`Couldn't find "${entry.name}" on Spotify.`); return; }
+        try {
+            await excludeArtist(entry.spotifyArtist, session.user.id);
+            setExcludedIds(prev => [...prev, entry.spotifyArtist.id]);
+            setHandledNames(prev => new Set([...prev, (entry.name || "").trim().toLowerCase()]));
+            onChanged && onChanged();
+        } catch (e2) { setCityError(e2.message); }
+    }
+    async function digCityArtist(entry) {
+        setCityError("");
+        if (!entry.spotifyArtist) { setCityError(`Couldn't find "${entry.name}" on Spotify.`); return; }
+        try {
+            const currentlyDigging = diggingIds.includes(entry.spotifyArtist.id);
+            await toggleDigArtist(entry.spotifyArtist, session.user.id, currentlyDigging);
+            setDiggingIds(prev => currentlyDigging ? prev.filter(id => id !== entry.spotifyArtist.id) : [...prev, entry.spotifyArtist.id]);
+            onChanged && onChanged();
+        } catch (e2) { setCityError(e2.message); }
+    }
+
+    async function doProducerSearch(e) {
+        if (e) e.preventDefault();
+        if (!producerQuery.trim()) return;
+        setProducerLoading(true);
+        setProducerError("");
+        setProducerSearchedFor(producerQuery.trim());
+        try {
+            const credits = await musicbrainzProducerCredits(producerQuery.trim(), 50);
+            const resolved = await mapWithConcurrency(credits, 4, async c => resolveProducerCreditToSpotify(c));
+            setProducerResults(resolved.filter(Boolean));
+        } catch (e2) {
+            setProducerError(e2.message || "Couldn't reach MusicBrainz.");
+        } finally {
+            setProducerLoading(false);
+        }
+    }
+
     return (React.createElement("div", null,
         React.createElement("div", { className: "pill-group", style: { margin: "14px 0" } },
             React.createElement("button", { className: `pill ${browseMode === "search" ? "selected" : ""}`, onClick: () => setBrowseMode("search") }, "Artists"),
             React.createElement("button", { className: `pill ${browseMode === "songs" ? "selected" : ""}`, onClick: () => setBrowseMode("songs") }, "Songs"),
-            React.createElement("button", { className: `pill ${browseMode === "genre" ? "selected" : ""}`, onClick: () => setBrowseMode("genre") }, "Genres")),
+            React.createElement("button", { className: `pill ${browseMode === "genre" ? "selected" : ""}`, onClick: () => setBrowseMode("genre") }, "Genres"),
+            React.createElement("button", { className: `pill ${browseMode === "city" ? "selected" : ""}`, onClick: () => setBrowseMode("city") }, "City"),
+            React.createElement("button", { className: `pill ${browseMode === "producer" ? "selected" : ""}`, onClick: () => setBrowseMode("producer") }, "Producer")),
 
         browseMode === "search" && React.createElement(React.Fragment, null,
             React.createElement("form", { className: "search-row", onSubmit: doSearch, style: { display: "flex", gap: 8, margin: "14px 0" } },
-                React.createElement("input", { type: "text", placeholder: "Search for an artist…", value: query, onChange: e => { setQuery(e.target.value); setAcEnabled(true); }, onFocus: () => setAcEnabled(true) }),
+                React.createElement("input", { type: "text", placeholder: "Search for an artist…", value: query, onChange: e => { setQuery(e.target.value); setAcEnabled(true); }, onFocus: () => setAcEnabled(true), onBlur: () => setAcEnabled(false), onKeyDown: e => { if (e.key === "Escape") { setAcEnabled(false); e.currentTarget.blur(); } } }),
                 React.createElement("button", { className: "primary", type: "submit", disabled: loading }, loading ? "…" : "Search"),
                 React.createElement(MusicAutocompleteDropdown, { query, enabled: acEnabled, closeSignal, onPick: openFromAutocomplete })),
             error && React.createElement("div", { style: { color: "var(--danger)", fontSize: 13 } }, error),
@@ -1926,7 +2202,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                         React.createElement("h3", { style: { margin: 0, textTransform: "capitalize" } }, `Top artists — ${selectedGenre}`)),
                     genreError && React.createElement("div", { style: { color: "var(--danger)", fontSize: 13 } }, genreError),
                     genreLoading ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…")) :
-                        React.createElement("div", { className: "grid" }, genreResults.map((entry, i) => {
+                        React.createElement("div", { className: "grid" }, genreResults.filter(entry => !handledNames.has((entry.name || "").trim().toLowerCase())).map((entry, i) => {
                             const img = entry.spotifyArtist && entry.spotifyArtist.images && entry.spotifyArtist.images.length ? entry.spotifyArtist.images[0].url : null;
                             const favId = entry.spotifyArtist && entry.spotifyArtist.id;
                             return React.createElement(MusicArtistCard, {
@@ -1943,7 +2219,56 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                     genreResults.length > 0 && React.createElement("div", { className: "pagination-row" },
                         React.createElement("button", { className: "ghost", disabled: genrePage <= 1, onClick: () => setGenrePage(p => Math.max(1, p - 1)) }, "‹ Prev"),
                         React.createElement("span", null, `Page ${genrePage}${genreTotalPages ? ` of ${genreTotalPages}` : ""}`),
-                        React.createElement("button", { className: "ghost", disabled: genreTotalPages ? genrePage >= genreTotalPages : genreResults.length < 50, onClick: () => setGenrePage(p => p + 1) }, "Next ›"))))));
+                        React.createElement("button", { className: "ghost", disabled: genreTotalPages ? genrePage >= genreTotalPages : genreResults.length < 50, onClick: () => setGenrePage(p => p + 1) }, "Next ›")))),
+
+        browseMode === "city" && React.createElement(React.Fragment, null,
+            React.createElement("form", { className: "search-row", onSubmit: doCitySearch, style: { display: "flex", gap: 8, margin: "14px 0" } },
+                React.createElement("input", { type: "text", placeholder: "Search by city — try \"Dallas\"…", value: cityQuery, onChange: e => setCityQuery(e.target.value) }),
+                React.createElement("button", { className: "primary", type: "submit", disabled: cityLoading }, cityLoading ? "…" : "Search")),
+            cityError && React.createElement("div", { style: { color: "var(--danger)", fontSize: 13 } }, cityError),
+            !cityLoading && cityResults.length === 0 && !cityError && (React.createElement("div", { className: "empty" },
+                React.createElement("div", { className: "display" }, "Search for a city or metro area"),
+                React.createElement("div", null, citySearchedFor ? "No matches found on MusicBrainz for that city." : "Try \"Dallas\", \"Austin\", \"Houston\", or \"San Antonio\" — covers the surrounding metro too."))),
+            cityLoading ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…")) :
+                cityResults.length > 0 && React.createElement("div", { className: "grid" }, cityResults.filter(entry => !handledNames.has((entry.name || "").trim().toLowerCase())).map((entry, i) => {
+                    const img = entry.spotifyArtist && entry.spotifyArtist.images && entry.spotifyArtist.images.length ? entry.spotifyArtist.images[0].url : null;
+                    const favId = entry.spotifyArtist && entry.spotifyArtist.id;
+                    return React.createElement(MusicArtistCard, {
+                        key: favId || `${entry.name}-${i}`, name: entry.name, imageUrl: img, subtitle: entry.area || "",
+                        onOpen: () => openCityArtist(entry),
+                        onFavorite: session ? () => favoriteCityArtist(entry) : null,
+                        favorited: favId ? favoritedIds.includes(favId) : false,
+                        onExclude: session ? () => excludeCityArtist(entry) : null,
+                        excluded: favId ? excludedIds.includes(favId) : false,
+                        onDig: session ? () => digCityArtist(entry) : null,
+                        digging: favId ? diggingIds.includes(favId) : false,
+                    });
+                }))),
+
+        browseMode === "producer" && React.createElement(React.Fragment, null,
+            React.createElement("form", { className: "search-row", onSubmit: doProducerSearch, style: { display: "flex", gap: 8, margin: "14px 0" } },
+                React.createElement("input", { type: "text", placeholder: "Search by producer — try \"Rick Rubin\"…", value: producerQuery, onChange: e => setProducerQuery(e.target.value) }),
+                React.createElement("button", { className: "primary", type: "submit", disabled: producerLoading }, producerLoading ? "…" : "Search")),
+            producerError && React.createElement("div", { style: { color: "var(--danger)", fontSize: 13 } }, producerError),
+            !producerLoading && producerResults.length === 0 && !producerError && (React.createElement("div", { className: "empty" },
+                React.createElement("div", { className: "display" }, "Search for a producer"),
+                React.createElement("div", null, producerSearchedFor ? "MusicBrainz's production credits are added by its community, so even a real producer can come back empty if nobody's logged their work yet." : "Shows songs they're credited as producer on, wherever MusicBrainz has that logged."))),
+            producerLoading ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…")) :
+                producerResults.length > 0 && React.createElement("div", { style: { marginTop: 8 } },
+                    producerResults.map(t => {
+                        const art = (t.album && t.album.images && t.album.images[0] && t.album.images[0].url) || null;
+                        const artistNames = (t.artists || []).map(ar => ar.name).join(", ");
+                        return React.createElement(React.Fragment, { key: t.id },
+                            React.createElement("div", { className: "log-row" },
+                                art ? React.createElement("img", { src: art, alt: "" }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                                React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => openTrackArtist(t) },
+                                    React.createElement("div", { className: "log-row-title" }, t.name),
+                                    React.createElement("div", { className: "log-row-meta" }, `${artistNames}${t.album && t.album.name ? " · " + t.album.name : ""}`)),
+                                React.createElement(SongPreviewToggle, { trackId: t.id, expanded: expandedTrackId === t.id, onToggle: () => setExpandedTrackId(prev => prev === t.id ? null : t.id) }),
+                                React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: diggingTrackIds.includes(t.id) ? "var(--gold)" : undefined }, disabled: diggingTrackIds.includes(t.id), onClick: () => digTrackFromSearch(t) }, diggingTrackIds.includes(t.id) ? "🔥 Added" : "🔥"),
+                                React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, disabled: queuedTrackIds.includes(t.id), onClick: () => queueTrackFromSearch(t) }, queuedTrackIds.includes(t.id) ? "Queued" : "+ Queue")),
+                            expandedTrackId === t.id && React.createElement(SongPreviewFrame, { trackId: t.id }));
+                    })))));
 }
 
 function useMusicLibrary(session, refreshToken, statusFilter) {
@@ -1976,27 +2301,47 @@ function useMusicLibrary(session, refreshToken, statusFilter) {
     return { rows, loading };
 }
 
+const MY_ARTISTS_SORTS = [
+    { key: "rating", label: "Rating" },
+    { key: "alpha", label: "A–Z" },
+    { key: "added", label: "Last Added" },
+];
+
 function MusicMyArtistsTab({ session, onOpenArtist, refreshToken }) {
     const { rows, loading } = useMusicLibrary(session, refreshToken, "rated");
     const [genreFilter, setGenreFilter] = useState("");
     const [genresOpen, setGenresOpen] = useState(false);
+    // "rated_at" is the closest thing to an "added" timestamp this table has —
+    // it's set whenever an artist is first rated and again whenever the rating
+    // is changed, so "Last Added" really means "most recently touched," which
+    // in practice is what people mean by it here.
+    const [sortBy, setSortBy] = useState("rating");
     const allGenres = useMemo(() => {
         const s = new Set();
         rows.forEach(r => (r.artists.genres || []).forEach(g => s.add(g)));
         return [...s].sort();
     }, [rows]);
     const filtered = genreFilter ? rows.filter(r => (r.artists.genres || []).includes(genreFilter)) : rows;
+    const sorted = useMemo(() => {
+        const list = [...filtered];
+        if (sortBy === "alpha") list.sort((a, b) => a.artists.name.localeCompare(b.artists.name));
+        else if (sortBy === "added") list.sort((a, b) => new Date(b.rated_at || 0) - new Date(a.rated_at || 0));
+        else list.sort((a, b) => (Number(b.rating) || 0) - (Number(a.rating) || 0));
+        return list;
+    }, [filtered, sortBy]);
     if (loading) return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…"));
     return (React.createElement("div", null,
-        allGenres.length > 0 && React.createElement("div", { style: { margin: "14px 0" } },
+        React.createElement("div", { className: "pill-group", style: { margin: "14px 0" } },
+            MY_ARTISTS_SORTS.map(s => React.createElement("button", { key: s.key, className: `pill ${sortBy === s.key ? "selected" : ""}`, onClick: () => setSortBy(s.key) }, s.label))),
+        allGenres.length > 0 && React.createElement("div", { style: { margin: "0 0 14px" } },
             React.createElement("button", { className: "pill", onClick: () => setGenresOpen(o => !o) }, genreFilter ? `Genre: ${genreFilter} ▾` : "Genre ▾"),
             genresOpen && React.createElement("div", { className: "pill-group", style: { marginTop: 8 } },
                 React.createElement("button", { className: `pill ${!genreFilter ? "selected" : ""}`, onClick: () => { setGenreFilter(""); setGenresOpen(false); } }, "All"),
                 allGenres.map(g => React.createElement("button", { className: `pill ${genreFilter === g ? "selected" : ""}`, key: g, onClick: () => { setGenreFilter(g); setGenresOpen(false); } }, g)))),
-        filtered.length === 0 ? (React.createElement("div", { className: "empty" },
+        sorted.length === 0 ? (React.createElement("div", { className: "empty" },
             React.createElement("div", { className: "display" }, "No rated artists yet"),
             React.createElement("div", null, "Rate artists from the Discover tab and they'll show up here."))) : (
-            filtered.map(r => (React.createElement("div", { className: "log-row", key: r.artist_id, onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } },
+            sorted.map(r => (React.createElement("div", { className: "log-row", key: r.artist_id, onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } },
                 r.artists.image_url ? React.createElement("img", { src: r.artists.image_url, alt: "" }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
                 React.createElement("div", { style: { flex: 1 } },
                     React.createElement("div", { className: "log-row-title" }, r.artists.name),
