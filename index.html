@@ -2067,9 +2067,10 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
         if (!cityQuery.trim()) return;
         setCityLoading(true);
         setCityError("");
-        setCitySearchedFor(cityQuery.trim());
+        const searchedCity = cityQuery.trim();
+        setCitySearchedFor(searchedCity);
         try {
-            const cities = citiesForCityQuery(cityQuery);
+            const cities = citiesForCityQuery(searchedCity);
             const hits = await musicbrainzArtistsByCity(cities, 60);
             // MusicBrainz can return the same artist more than once across the
             // matched cities/fields — dedupe by MBID, keep whichever hit scored higher.
@@ -2089,7 +2090,22 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                     return { name: a.name, area: "", spotifyArtist: null };
                 }
             });
-            setCityResults(resolved);
+            // Brandon's feedback 2026-09-15: searching "Dallas" came back almost entirely
+            // Fort Worth bands, buried under names nobody's heard of. Metro grouping is
+            // still the point (Fort Worth SHOULD show up under a Dallas search, just
+            // clearly noted via the area subtitle) — but the artists actually FROM the
+            // searched city should lead the list, and within each group the more-followed
+            // (i.e. more recognizable) artists should surface before obscure ones, instead
+            // of sorting purely by MusicBrainz's text-relevance score.
+            const searchedLower = searchedCity.toLowerCase();
+            const isSearchedCity = area => !!area && area.toLowerCase().includes(searchedLower);
+            const followerCount = entry => (entry.spotifyArtist && entry.spotifyArtist.followers && entry.spotifyArtist.followers.total) || 0;
+            const sorted = resolved.slice().sort((a, b) => {
+                const primaryDiff = (isSearchedCity(b.area) ? 1 : 0) - (isSearchedCity(a.area) ? 1 : 0);
+                if (primaryDiff !== 0) return primaryDiff;
+                return followerCount(b) - followerCount(a);
+            });
+            setCityResults(sorted);
         } catch (e2) {
             setCityError(e2.message || "Couldn't reach MusicBrainz.");
         } finally {
@@ -2147,6 +2163,35 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
         } finally {
             setProducerLoading(false);
         }
+    }
+    // A producer is usually credited on several songs off the same album — showing
+    // each as its own row (per Brandon's feedback) reads as clutter and can even look
+    // like the same album's soundtrack got miscounted as "a movie". Group resolved
+    // credits by Spotify album id; a group with 2+ songs renders as one album row,
+    // a group of exactly 1 stays a plain song row.
+    function groupProducerResults(tracks) {
+        const byAlbum = new Map();
+        const singles = [];
+        for (const t of tracks) {
+            const albumId = t.album && t.album.id;
+            if (!albumId) { singles.push(t); continue; }
+            if (!byAlbum.has(albumId)) byAlbum.set(albumId, { album: t.album, tracks: [] });
+            byAlbum.get(albumId).tracks.push(t);
+        }
+        const albums = [];
+        for (const group of byAlbum.values()) {
+            if (group.tracks.length > 1) albums.push(group);
+            else singles.push(group.tracks[0]);
+        }
+        return { albums, singles };
+    }
+    async function digProducerAlbum(group) {
+        const todo = group.tracks.filter(t => !diggingTrackIds.includes(t.id));
+        await mapWithConcurrency(todo, 3, t => digTrackFromSearch(t));
+    }
+    async function queueProducerAlbum(group) {
+        const todo = group.tracks.filter(t => !queuedTrackIds.includes(t.id));
+        await mapWithConcurrency(todo, 3, t => queueTrackFromSearch(t));
     }
 
     return (React.createElement("div", null,
@@ -2265,21 +2310,41 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                 React.createElement("div", { className: "display" }, "Search for a producer"),
                 React.createElement("div", null, producerSearchedFor ? "MusicBrainz's production credits are added by its community, so even a real producer can come back empty if nobody's logged their work yet." : "Shows songs they're credited as producer on, wherever MusicBrainz has that logged."))),
             producerLoading ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…")) :
-                producerResults.length > 0 && React.createElement("div", { style: { marginTop: 8 } },
-                    producerResults.map(t => {
-                        const art = (t.album && t.album.images && t.album.images[0] && t.album.images[0].url) || null;
-                        const artistNames = (t.artists || []).map(ar => ar.name).join(", ");
-                        return React.createElement(React.Fragment, { key: t.id },
-                            React.createElement("div", { className: "log-row" },
-                                art ? React.createElement("img", { src: art, alt: "" }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
-                                React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => openTrackArtist(t) },
-                                    React.createElement("div", { className: "log-row-title" }, t.name),
-                                    React.createElement("div", { className: "log-row-meta" }, `${artistNames}${t.album && t.album.name ? " · " + t.album.name : ""}`)),
-                                React.createElement(SongPreviewToggle, { trackId: t.id, expanded: expandedTrackId === t.id, onToggle: () => setExpandedTrackId(prev => prev === t.id ? null : t.id) }),
-                                React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: diggingTrackIds.includes(t.id) ? "var(--gold)" : undefined }, disabled: diggingTrackIds.includes(t.id), onClick: () => digTrackFromSearch(t) }, diggingTrackIds.includes(t.id) ? "🔥 Added" : "🔥"),
-                                React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, disabled: queuedTrackIds.includes(t.id), onClick: () => queueTrackFromSearch(t) }, queuedTrackIds.includes(t.id) ? "Queued" : "+ Queue")),
-                            expandedTrackId === t.id && React.createElement(SongPreviewFrame, { trackId: t.id }));
-                    })))));
+                producerResults.length > 0 && (() => {
+                    const { albums, singles } = groupProducerResults(producerResults);
+                    return React.createElement("div", { style: { marginTop: 8 } },
+                        albums.map(group => {
+                            const first = group.tracks[0];
+                            const art = (group.album.images && group.album.images[0] && group.album.images[0].url) || null;
+                            const artistNames = (first.artists || []).map(ar => ar.name).join(", ");
+                            const allDigging = group.tracks.every(t => diggingTrackIds.includes(t.id));
+                            const allQueued = group.tracks.every(t => queuedTrackIds.includes(t.id));
+                            return React.createElement(React.Fragment, { key: `album-${group.album.id}` },
+                                React.createElement("div", { className: "log-row" },
+                                    art ? React.createElement("img", { src: art, alt: "" }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                                    React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => openTrackArtist(first) },
+                                        React.createElement("div", { className: "log-row-title" }, group.album.name),
+                                        React.createElement("div", { className: "log-row-meta" }, `${artistNames} · Album · ${group.tracks.length} songs produced`)),
+                                    React.createElement(SongPreviewToggle, { trackId: first.id, expanded: expandedTrackId === first.id, onToggle: () => setExpandedTrackId(prev => prev === first.id ? null : first.id) }),
+                                    React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: allDigging ? "var(--gold)" : undefined }, disabled: allDigging, onClick: () => digProducerAlbum(group) }, allDigging ? "🔥 Added" : "🔥 Add all"),
+                                    React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, disabled: allQueued, onClick: () => queueProducerAlbum(group) }, allQueued ? "Queued" : "+ Queue all")),
+                                expandedTrackId === first.id && React.createElement(SongPreviewFrame, { trackId: first.id }));
+                        }),
+                        singles.map(t => {
+                            const art = (t.album && t.album.images && t.album.images[0] && t.album.images[0].url) || null;
+                            const artistNames = (t.artists || []).map(ar => ar.name).join(", ");
+                            return React.createElement(React.Fragment, { key: t.id },
+                                React.createElement("div", { className: "log-row" },
+                                    art ? React.createElement("img", { src: art, alt: "" }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+                                    React.createElement("div", { style: { flex: 1, cursor: "pointer" }, onClick: () => openTrackArtist(t) },
+                                        React.createElement("div", { className: "log-row-title" }, t.name),
+                                        React.createElement("div", { className: "log-row-meta" }, `${artistNames}${t.album && t.album.name ? " · " + t.album.name : ""}`)),
+                                    React.createElement(SongPreviewToggle, { trackId: t.id, expanded: expandedTrackId === t.id, onToggle: () => setExpandedTrackId(prev => prev === t.id ? null : t.id) }),
+                                    React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5, color: diggingTrackIds.includes(t.id) ? "var(--gold)" : undefined }, disabled: diggingTrackIds.includes(t.id), onClick: () => digTrackFromSearch(t) }, diggingTrackIds.includes(t.id) ? "🔥 Added" : "🔥"),
+                                    React.createElement("button", { className: "ghost", style: { padding: "5px 10px", fontSize: 11.5 }, disabled: queuedTrackIds.includes(t.id), onClick: () => queueTrackFromSearch(t) }, queuedTrackIds.includes(t.id) ? "Queued" : "+ Queue")),
+                                expandedTrackId === t.id && React.createElement(SongPreviewFrame, { trackId: t.id }));
+                        }));
+                })())));
 }
 
 function useMusicLibrary(session, refreshToken, statusFilter) {
