@@ -919,18 +919,57 @@ function followerCountOf(entry) {
     return (entry.spotifyArtist && entry.spotifyArtist.followers && entry.spotifyArtist.followers.total) || 0;
 }
 
+// Root cause of "searching Texas returned nothing" (2026-09-17): MusicBrainz's
+// area/begin-area tagging is filled in by volunteer editors, who overwhelmingly log
+// their OWN small local bands' exact hometown in detail — but a lot of genuinely
+// famous major-label acts have no city-level area set at all (often just "United
+// States", or nothing). So a search that leans on that field surfaces a pool of
+// mostly obscure local acts ("bands ive never heard of" — confirmed for the old
+// single-city Dallas search too), and once that same pool also gets filtered by
+// Spotify follower count, it can legitimately come back empty even across a whole
+// state's worth of cities. A seed list side-steps this entirely: these are artists
+// resolved straight to Spotify by name, always shown first in their cluster
+// regardless of what MusicBrainz has (or hasn't) tagged. MusicBrainz search still
+// runs underneath to fill out each cluster with real mid-major/local finds. Only
+// names I'm confident are correctly tied to that city are listed here — clusters
+// with no confident seed yet (Waco, Amarillo, Killeen–Temple) fall back to
+// MusicBrainz alone for now. Safe to add to, correct, or expand.
+const SEED_MAJOR_ARTISTS = {
+    "Dallas–Fort Worth": ["Post Malone", "Selena Gomez", "Erykah Badu", "St. Vincent", "Old 97's", "Toadies", "Leon Bridges", "Edie Brickell & New Bohemians", "Kirk Franklin", "Pantera", "Demi Lovato"],
+    "Austin": ["Spoon", "Gary Clark Jr.", "Explosions in the Sky", "Shakey Graves", "The Black Angels", "White Denim", "...And You Will Know Us By The Trail Of Dead", "Fastball", "Willie Nelson"],
+    "Houston": ["Beyoncé", "Destiny's Child", "Travis Scott", "Megan Thee Stallion", "ZZ Top", "Geto Boys", "Lizzo"],
+    "San Antonio": ["Girl in a Coma"],
+    "El Paso": ["Khalid", "At the Drive-In", "The Mars Volta", "Sparta"],
+    "Corpus Christi": ["Selena"],
+    "Lubbock": ["Buddy Holly", "Mac Davis", "Natalie Maines"],
+};
+async function resolveSeedArtists(label) {
+    const names = SEED_MAJOR_ARTISTS[label] || [];
+    if (!names.length) return [];
+    const resolved = await mapWithConcurrency(names, 4, async n => {
+        try {
+            const spotifyArtist = await resolveArtistByName(n);
+            return spotifyArtist ? { name: spotifyArtist.name, area: label, spotifyArtist, seeded: true } : null;
+        } catch (e2) {
+            return null;
+        }
+    });
+    return resolved.filter(Boolean);
+}
+
 // Typing something that isn't a recognized state (e.g. a specific city) still works
 // as a plain city/metro search, same as before the state redesign — matched against
 // every city cluster's own city list first (so "Dallas" alone still pulls the same
-// metro group), otherwise treated as one exact city name.
-function citiesForCityQuery(q) {
+// metro group, with its seed artists too), otherwise treated as one exact city name
+// with no seed list.
+function clusterForCityQuery(q) {
     const key = q.trim().toLowerCase();
     for (const groups of Object.values(STATE_CITY_GROUPS)) {
         for (const g of groups) {
-            if (g.cities.some(c => c.toLowerCase() === key) || g.label.toLowerCase() === key) return g.cities;
+            if (g.cities.some(c => c.toLowerCase() === key) || g.label.toLowerCase() === key) return g;
         }
     }
-    return [q.trim()];
+    return null;
 }
 
 // Producer search — another MusicBrainz-only fact, and a step further out than City:
@@ -1010,11 +1049,17 @@ function lastfmImage(images) {
 
 // Shared "favorite" quick-add: puts an artist straight into My Artists without
 // making the user pick a number first. Keeps an existing rating if there is one.
-async function quickFavoriteArtist(spotifyArtist, userId) {
+// `discoverySource` (e.g. "city", "genre") tags which DIALD browse surface this
+// came from, for the Discovered tab — only ever set the FIRST time an artist is
+// favorited, never overwritten by a later re-favorite/edit that has no source of
+// its own (e.g. from the artist page directly).
+async function quickFavoriteArtist(spotifyArtist, userId, discoverySource) {
     const row = await ensureArtistRow(spotifyArtist);
-    const { data: existing } = await bandDumpDb.from("user_artist_ratings").select("rating").eq("user_id", userId).eq("artist_id", row.id).maybeSingle();
+    const { data: existing } = await bandDumpDb.from("user_artist_ratings").select("rating, discovered_via").eq("user_id", userId).eq("artist_id", row.id).maybeSingle();
     const rating = (existing && existing.rating != null) ? Number(existing.rating) : 8.0;
-    const { error } = await bandDumpDb.from("user_artist_ratings").upsert({ user_id: userId, artist_id: row.id, rating, status: "rated", rated_at: new Date().toISOString() });
+    const payload = { user_id: userId, artist_id: row.id, rating, status: "rated", rated_at: new Date().toISOString() };
+    if (!existing || existing.discovered_via == null) payload.discovered_via = discoverySource || null;
+    const { error } = await bandDumpDb.from("user_artist_ratings").upsert(payload);
     if (error) throw error;
     return row;
 }
@@ -1042,13 +1087,14 @@ async function excludeArtist(spotifyArtist, userId) {
 // "Digging" is independent of rated/queued/excluded status — you can be
 // actively into an artist you've already rated, or one you haven't gotten to
 // yet. Lives in its own table so it doesn't collide with user_artist_ratings.status.
-async function toggleDigArtist(spotifyArtist, userId, currentlyDigging) {
+// `discoverySource` tags the browse surface, same as quickFavoriteArtist above.
+async function toggleDigArtist(spotifyArtist, userId, currentlyDigging, discoverySource) {
     const row = await ensureArtistRow(spotifyArtist);
     if (currentlyDigging) {
         const { error } = await bandDumpDb.from("digging_artists").delete().eq("user_id", userId).eq("artist_id", row.id);
         if (error) throw error;
     } else {
-        const { error } = await bandDumpDb.from("digging_artists").insert({ user_id: userId, artist_id: row.id });
+        const { error } = await bandDumpDb.from("digging_artists").insert({ user_id: userId, artist_id: row.id, discovered_via: discoverySource || null });
         if (error && error.code !== "23505") throw error;
     }
     return row;
@@ -1515,6 +1561,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
     const [topSongs, setTopSongs] = useState([]);
     const [topSongsLoading, setTopSongsLoading] = useState(true);
     const [bio, setBio] = useState("");
+    const [bioExpanded, setBioExpanded] = useState(false);
     const [expandedTrackId, setExpandedTrackId] = useState(null);
 
     async function refreshFavSongs(artistId) {
@@ -1566,6 +1613,7 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
         setTopSongsLoading(true);
         setTopSongs([]);
         setBio("");
+        setBioExpanded(false);
         (async () => {
             const [songsResult, infoResult] = await Promise.allSettled([
                 spotifyTopSongsFallback(spotifyArtist.name, spotifyArtist.id, 10),
@@ -1698,10 +1746,11 @@ function ArtistDetailModal({ spotifyArtist, session, onClose, onChanged }) {
                             artistRow.genres.map(g => (React.createElement("span", { className: "genre-tag removable", key: g },
                                 g,
                                 React.createElement("button", { onClick: () => removeGenre(g), title: "Remove tag" }, "✕")))),
-                            React.createElement("input", { type: "text", placeholder: "+ genre", value: newGenre, style: { width: 110, padding: "3px 8px", fontSize: 11 }, onChange: e => setNewGenre(e.target.value), onKeyDown: e => { if (e.key === "Enter") addGenre(); } })),
-                        artistRow.spotify_url && React.createElement("a", { href: artistRow.spotify_url, target: "_blank", rel: "noopener", style: { fontSize: 12, color: "var(--sage)" } }, "Open in Spotify ↗")),
+                            React.createElement("input", { type: "text", placeholder: "+ genre", value: newGenre, style: { width: 110, padding: "3px 8px", fontSize: 11 }, onChange: e => setNewGenre(e.target.value), onKeyDown: e => { if (e.key === "Enter") addGenre(); } }))),
                 ),
-                bio && React.createElement("p", { className: "artist-bio" }, bio.length > 320 ? bio.slice(0, 320) + "…" : bio),
+                bio && React.createElement(React.Fragment, null,
+                    React.createElement("p", { className: "artist-bio" }, (!bioExpanded && bio.length > 320) ? bio.slice(0, 320) + "…" : bio),
+                    !bioExpanded && bio.length > 320 && React.createElement("button", { className: "ghost", style: { padding: "3px 8px", fontSize: 11.5, marginTop: 2 }, onClick: () => setBioExpanded(true) }, "Continue reading")),
                 error && React.createElement("div", { style: { color: "var(--danger)", fontSize: 12.5, marginTop: 10 } }, error),
                 React.createElement("label", null, "Rating"),
                 editingRating
@@ -1797,19 +1846,58 @@ function SongPreviewToggle({ trackId, expanded, onToggle }) {
     if (!trackId) return null;
     return React.createElement("button", { className: "ghost", style: { padding: "5px 8px", fontSize: 11.5 }, onClick: onToggle, title: expanded ? "Hide player" : "Play" }, expanded ? "✕" : "▶");
 }
+
+// Was: a plain <iframe src="...&autoplay=1">. That leans on the browser (and
+// Spotify's own embed page) granting autoplay-with-sound purely from a URL param,
+// which is inconsistent — in practice it showed up as "clicking ▶ only reveals
+// Spotify's player, and THAT needs its own separate click to actually start
+// audio" (reported 2026-09-17). Spotify publishes a real IFrame Playback API for
+// exactly this: instead of hoping the URL param is honored, we create a
+// controller for the embed and call controller.play() ourselves, from the same
+// click that reveals the player — that's what reliably counts as "the user asked
+// for audio" across browsers, not just the presence of a query string.
+let spotifyIframeApiPromise = null;
+function loadSpotifyIframeApi() {
+    if (spotifyIframeApiPromise) return spotifyIframeApiPromise;
+    spotifyIframeApiPromise = new Promise(resolve => {
+        if (window.Spotify && window.Spotify.__iFrameApiLoaded) { resolve(window.Spotify.__iFrameApi); return; }
+        window.onSpotifyIframeApiReady = IFrameAPI => {
+            window.Spotify = window.Spotify || {};
+            window.Spotify.__iFrameApiLoaded = true;
+            window.Spotify.__iFrameApi = IFrameAPI;
+            resolve(IFrameAPI);
+        };
+        if (!document.getElementById("spotify-iframe-api-script")) {
+            const script = document.createElement("script");
+            script.id = "spotify-iframe-api-script";
+            script.src = "https://open.spotify.com/embed/iframe-api/v1";
+            script.async = true;
+            document.head.appendChild(script);
+        }
+    });
+    return spotifyIframeApiPromise;
+}
 function SongPreviewFrame({ trackId }) {
-    return React.createElement("iframe", {
-        // autoplay=1: without it, clicking ▶ only reveals Spotify's own embed
-        // player, which then needs a second click on ITS play button to
-        // actually start audio — reads as a broken/duplicate play control.
-        // Spotify's embed widget honors this param and starts playing as soon
-        // as it loads, so the one click that reveals it is the only click
-        // needed. (allow="autoplay" below is what lets the browser honor it.)
-        src: `https://open.spotify.com/embed/track/${trackId}?utm_source=generator&theme=0&autoplay=1`,
-        width: "100%", height: "80", frameBorder: "0",
-        allow: "autoplay; encrypted-media; fullscreen; picture-in-picture",
-        loading: "lazy",
-        style: { borderRadius: 8, marginTop: -4, marginBottom: 8, display: "block" },
+    const hostRef = useRef(null);
+    const controllerRef = useRef(null);
+    useEffect(() => {
+        let cancelled = false;
+        loadSpotifyIframeApi().then(IFrameAPI => {
+            if (cancelled || !hostRef.current) return;
+            IFrameAPI.createController(hostRef.current, { uri: `spotify:track:${trackId}`, width: "100%", height: "80" }, controller => {
+                if (cancelled) { controller.destroy(); return; }
+                controllerRef.current = controller;
+                controller.play();
+            });
+        });
+        return () => {
+            cancelled = true;
+            if (controllerRef.current) { controllerRef.current.destroy(); controllerRef.current = null; }
+        };
+    }, [trackId]);
+    return React.createElement("div", {
+        ref: hostRef,
+        style: { borderRadius: 8, marginTop: -4, marginBottom: 8, minHeight: 80 },
     });
 }
 
@@ -2071,7 +2159,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
         setGenreError("");
         if (!entry.spotifyArtist) { setGenreError(`Couldn't find "${entry.name}" on Spotify.`); return; }
         try {
-            const row = await quickFavoriteArtist(entry.spotifyArtist, session.user.id);
+            const row = await quickFavoriteArtist(entry.spotifyArtist, session.user.id, "genre");
             await attachGenreTag(row.id, selectedGenre);
             setFavoritedIds(prev => [...prev, entry.spotifyArtist.id]);
             setHandledNames(prev => new Set([...prev, (entry.name || "").trim().toLowerCase()]));
@@ -2094,7 +2182,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
         if (!entry.spotifyArtist) { setGenreError(`Couldn't find "${entry.name}" on Spotify.`); return; }
         try {
             const currentlyDigging = diggingIds.includes(entry.spotifyArtist.id);
-            const row = await toggleDigArtist(entry.spotifyArtist, session.user.id, currentlyDigging);
+            const row = await toggleDigArtist(entry.spotifyArtist, session.user.id, currentlyDigging, "genre");
             await attachGenreTag(row.id, selectedGenre);
             setDiggingIds(prev => currentlyDigging ? prev.filter(id => id !== entry.spotifyArtist.id) : [...prev, entry.spotifyArtist.id]);
             onChanged && onChanged();
@@ -2141,9 +2229,15 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                 // only — MusicBrainz logs every local band ever formed, and Brandon's ask
                 // was that not every one of those should clutter this list. The long tail
                 // stays fully reachable by name in Search, and still shows its hometown on
-                // its own artist page.
+                // its own artist page. Each cluster's curated seed artists (see
+                // SEED_MAJOR_ARTISTS above) are resolved in parallel and always lead that
+                // cluster's list — this is what keeps a state search from coming back
+                // empty (2026-09-17 fix).
                 const allCities = stateGroups.flatMap(g => g.cities);
-                const resolved = await resolveCityHits(allCities, 100);
+                const [resolved, seedGroups] = await Promise.all([
+                    resolveCityHits(allCities, 100),
+                    Promise.all(stateGroups.map(async g => ({ label: g.label, items: await resolveSeedArtists(g.label) }))),
+                ]);
                 const major = resolved.filter(r => followerCountOf(r) >= CITY_MAJOR_FOLLOWER_THRESHOLD);
                 const buckets = stateGroups.map(g => ({ label: g.label, cityKeys: g.cities.map(c => c.toLowerCase()), items: [] }));
                 const other = [];
@@ -2152,7 +2246,15 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
                     const bucket = areaLower && buckets.find(b => b.cityKeys.some(c => areaLower.includes(c) || c.includes(areaLower)));
                     (bucket || { items: other }).items.push(r);
                 });
-                buckets.forEach(b => b.items.sort((a, b2) => followerCountOf(b2) - followerCountOf(a)));
+                buckets.forEach(b => {
+                    const seedGroup = seedGroups.find(s => s.label === b.label);
+                    const seedItems = seedGroup ? seedGroup.items : [];
+                    const seedNames = new Set(seedItems.map(s => s.name.trim().toLowerCase()));
+                    const discovered = b.items
+                        .filter(r => !seedNames.has((r.name || "").trim().toLowerCase()))
+                        .sort((a, b2) => followerCountOf(b2) - followerCountOf(a));
+                    b.items = [...seedItems.slice().sort((a, b2) => followerCountOf(b2) - followerCountOf(a)), ...discovered];
+                });
                 other.sort((a, b2) => followerCountOf(b2) - followerCountOf(a));
                 const groups = buckets.filter(b => b.items.length > 0);
                 if (other.length) groups.push({ label: "Other Texas", items: other });
@@ -2161,13 +2263,21 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
             } else {
                 // Fallback: not a recognized state — treat it as a plain city/metro name,
                 // same lookup as before the state redesign, still filtered to major/
-                // mid-major and shown as a single group.
-                const cities = citiesForCityQuery(searchedRaw);
-                const resolved = await resolveCityHits(cities, 60);
-                const major = resolved
-                    .filter(r => followerCountOf(r) >= CITY_MAJOR_FOLLOWER_THRESHOLD)
+                // mid-major and shown as a single group. If it matches one of the known
+                // clusters (e.g. "Dallas"), that cluster's seed artists lead the list too.
+                const cluster = clusterForCityQuery(searchedRaw);
+                const cities = cluster ? cluster.cities : [searchedRaw];
+                const label = cluster ? cluster.label : searchedRaw;
+                const [resolved, seedItems] = await Promise.all([
+                    resolveCityHits(cities, 60),
+                    cluster ? resolveSeedArtists(cluster.label) : Promise.resolve([]),
+                ]);
+                const seedNames = new Set(seedItems.map(s => s.name.trim().toLowerCase()));
+                const discovered = resolved
+                    .filter(r => followerCountOf(r) >= CITY_MAJOR_FOLLOWER_THRESHOLD && !seedNames.has((r.name || "").trim().toLowerCase()))
                     .sort((a, b) => followerCountOf(b) - followerCountOf(a));
-                setCityGroups(major.length ? [{ label: searchedRaw, items: major }] : []);
+                const items = [...seedItems.slice().sort((a, b) => followerCountOf(b) - followerCountOf(a)), ...discovered];
+                setCityGroups(items.length ? [{ label, items }] : []);
             }
         } catch (e2) {
             setCityError(e2.message || "Couldn't reach MusicBrainz.");
@@ -2184,7 +2294,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
         setCityError("");
         if (!entry.spotifyArtist) { setCityError(`Couldn't find "${entry.name}" on Spotify.`); return; }
         try {
-            await quickFavoriteArtist(entry.spotifyArtist, session.user.id);
+            await quickFavoriteArtist(entry.spotifyArtist, session.user.id, "city");
             setFavoritedIds(prev => [...prev, entry.spotifyArtist.id]);
             setHandledNames(prev => new Set([...prev, (entry.name || "").trim().toLowerCase()]));
             onChanged && onChanged();
@@ -2205,7 +2315,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
         if (!entry.spotifyArtist) { setCityError(`Couldn't find "${entry.name}" on Spotify.`); return; }
         try {
             const currentlyDigging = diggingIds.includes(entry.spotifyArtist.id);
-            await toggleDigArtist(entry.spotifyArtist, session.user.id, currentlyDigging);
+            await toggleDigArtist(entry.spotifyArtist, session.user.id, currentlyDigging, "city");
             setDiggingIds(prev => currentlyDigging ? prev.filter(id => id !== entry.spotifyArtist.id) : [...prev, entry.spotifyArtist.id]);
             onChanged && onChanged();
         } catch (e2) { setCityError(e2.message); }
@@ -2262,7 +2372,7 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
             React.createElement("button", { className: `pill ${browseMode === "search" ? "selected" : ""}`, onClick: () => setBrowseMode("search") }, "Artists"),
             React.createElement("button", { className: `pill ${browseMode === "songs" ? "selected" : ""}`, onClick: () => setBrowseMode("songs") }, "Songs"),
             React.createElement("button", { className: `pill ${browseMode === "genre" ? "selected" : ""}`, onClick: () => setBrowseMode("genre") }, "Genres"),
-            React.createElement("button", { className: `pill ${browseMode === "city" ? "selected" : ""}`, onClick: () => setBrowseMode("city") }, "City"),
+            React.createElement("button", { className: `pill ${browseMode === "city" ? "selected" : ""}`, onClick: () => setBrowseMode("city") }, "By State"),
             React.createElement("button", { className: `pill ${browseMode === "producer" ? "selected" : ""}`, onClick: () => setBrowseMode("producer") }, "Producer")),
 
         browseMode === "search" && React.createElement(React.Fragment, null,
@@ -2492,6 +2602,67 @@ function MusicMyArtistsTab({ session, onOpenArtist, refreshToken }) {
                     React.createElement("div", { className: "log-row-title" }, r.artists.name),
                     React.createElement("div", { className: "log-row-meta" }, (r.artists.genres || []).slice(0, 3).join(", ") || "—")),
                 React.createElement("div", { className: "log-row-rating" }, Number(r.rating).toFixed(1))))))));
+}
+
+// "Discovered on DIALD" (added 2026-09-17, per Brandon: "should be a list on Diald
+// of bands... you discovered because of Diald"). There's no way to detect after
+// the fact whether someone already knew a band before adding it to Spotify/
+// YouTube — those platforms don't expose that. What DIALD *can* know for certain
+// is which of its own browse surfaces first surfaced an artist for this user:
+// City or Genre browse are explicitly "here's something new," while typing a
+// name into Search or opening an artist directly means the user already knew who
+// they were looking for. quickFavoriteArtist/toggleDigArtist tag `discovered_via`
+// with that surface the first time an artist is favorited/dug from it (see
+// favoriteCityArtist/digCityArtist/favoriteGenreArtist/digGenreArtist above) — this
+// pulls both tables together into one combined, deduped list. Producer browse and
+// favoriting from inside the artist page itself aren't tagged yet (that page isn't
+// told which surface opened it) — a reasonable fast-follow, not done here.
+const DISCOVERY_SOURCE_LABELS = { city: "City", genre: "Genre" };
+function useDiscoveredArtists(session, refreshToken) {
+    const [rows, setRows] = useState([]);
+    const [loading, setLoading] = useState(true);
+    useEffect(() => {
+        if (!session) return;
+        let cancelled = false;
+        setLoading(true);
+        (async () => {
+            const [ratedRes, diggingRes] = await Promise.all([
+                bandDumpDb.from("user_artist_ratings")
+                    .select("artist_id, rated_at, discovered_via, artists:artist_id (id, spotify_id, name, image_url, spotify_url)")
+                    .eq("user_id", session.user.id).not("discovered_via", "is", null),
+                bandDumpDb.from("digging_artists")
+                    .select("artist_id, added_at, discovered_via, artists:artist_id (id, spotify_id, name, image_url, spotify_url)")
+                    .eq("user_id", session.user.id).not("discovered_via", "is", null),
+            ]);
+            if (cancelled) return;
+            const byArtist = new Map();
+            ((ratedRes.data) || []).forEach(r => {
+                if (!r.artists) return;
+                byArtist.set(r.artist_id, { artist_id: r.artist_id, artists: r.artists, discovered_via: r.discovered_via, when: r.rated_at });
+            });
+            ((diggingRes.data) || []).forEach(r => {
+                if (!r.artists || byArtist.has(r.artist_id)) return; // rated entry already covers it
+                byArtist.set(r.artist_id, { artist_id: r.artist_id, artists: r.artists, discovered_via: r.discovered_via, when: r.added_at });
+            });
+            const merged = Array.from(byArtist.values()).sort((a, b) => new Date(b.when || 0) - new Date(a.when || 0));
+            if (!cancelled) { setRows(merged); setLoading(false); }
+        })();
+        return () => { cancelled = true; };
+    }, [session, refreshToken]);
+    return { rows, loading };
+}
+function DiscoveredTab({ session, onOpenArtist, refreshToken }) {
+    const { rows, loading } = useDiscoveredArtists(session, refreshToken);
+    if (loading) return React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…"));
+    if (rows.length === 0) return React.createElement("div", { className: "empty" },
+        React.createElement("div", { className: "display" }, "Nothing discovered yet"),
+        React.createElement("div", null, "Favorite or add an artist from City or Genre browse and they'll show up here as bands you found through DIALD."));
+    return React.createElement("div", null,
+        rows.map(r => React.createElement("div", { className: "log-row", key: r.artist_id, onClick: () => onOpenArtist(shimArtistFromRow(r.artists)), style: { cursor: "pointer" } },
+            r.artists.image_url ? React.createElement("img", { src: r.artists.image_url, alt: "" }) : React.createElement("div", { style: { width: 46, height: 46, background: "var(--divider)", borderRadius: 3, flexShrink: 0 } }),
+            React.createElement("div", { style: { flex: 1 } },
+                React.createElement("div", { className: "log-row-title" }, r.artists.name),
+                React.createElement("div", { className: "log-row-meta" }, `Found via ${DISCOVERY_SOURCE_LABELS[r.discovered_via] || r.discovered_via}`)))));
 }
 
 function useSongQueue(session, refreshToken) {
@@ -3091,12 +3262,14 @@ function MusicApp({ session, onRequireLogin }) {
             React.createElement("button", { className: `tab ${musicTab === "my-songs" ? "active" : ""}`, onClick: () => setMusicTab("my-songs") }, "My Songs"),
             React.createElement("button", { className: `tab ${musicTab === "digging" ? "active" : ""}`, onClick: () => setMusicTab("digging") }, "Need to Check Out"),
             React.createElement("button", { className: `tab ${musicTab === "queue" ? "active" : ""}`, onClick: () => setMusicTab("queue") }, "Queue"),
+            React.createElement("button", { className: `tab ${musicTab === "discovered" ? "active" : ""}`, onClick: () => setMusicTab("discovered") }, "Discovered"),
             React.createElement("button", { className: `tab ${musicTab === "spin" ? "active" : ""}`, onClick: () => setMusicTab("spin") }, "Randomnator")),
         musicTab === "discover" && React.createElement(MusicDiscoverTab, { onOpenArtist: setOpenArtist, session, onChanged: () => setRefreshToken(t => t + 1) }),
         musicTab === "my-artists" && React.createElement(MusicMyArtistsTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
         musicTab === "my-songs" && React.createElement(MusicMySongsTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
         musicTab === "digging" && React.createElement(DiggingTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
         musicTab === "queue" && React.createElement(MusicQueueTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
+        musicTab === "discovered" && React.createElement(DiscoveredTab, { session, onOpenArtist: setOpenArtist, refreshToken }),
         musicTab === "spin" && React.createElement(MusicRandomnatorTab, { session, onOpenArtist: setOpenArtist, onChanged: () => setRefreshToken(t => t + 1) }),
         openArtist && React.createElement(ArtistDetailModal, { spotifyArtist: openArtist, session, onClose: () => setOpenArtist(null), onChanged: () => setRefreshToken(t => t + 1) })));
 }
@@ -4185,133 +4358,5 @@ function TonightTab({ ratings, onRate, onPlatformClick, onActorClick, notForMeId
                 const filtered = more.filter(m => !isExcluded(m, picked.map(p => p.id)));
                 while (picked.length < count && filtered.length > 0) {
                     picked.push(filtered.shift());
-                }
-                pool = filtered;
-            }
-            catch (e) { }
-        }
-        setCandidatePool(pool);
-        if (picked.length > 0) {
-            setRecs(prev => (prev || []).concat(picked).slice(0, 5));
-            setSeenIds(prev => prev.concat(picked.map(m => m.id)));
-        }
-        setBackfilling(false);
-    }
-    function removeSuggestion(movie) {
-        setRecs(prev => (prev || []).filter(m => m.id !== movie.id));
-        setHeldMovies(prev => prev.filter(m => m.id !== movie.id));
-        onAddNotForMe(movie);
-        backfillSlots(1);
-    }
-    function excludeGenre(genreId) {
-        onAddExcludedGenre(genreId);
-        const removedFromRecs = (recs || []).filter(m => (m.genre_ids || []).indexOf(genreId) !== -1).length;
-        setRecs(prev => (prev || []).filter(m => (m.genre_ids || []).indexOf(genreId) === -1));
-        setHeldMovies(prev => prev.filter(m => (m.genre_ids || []).indexOf(genreId) === -1));
-        if (removedFromRecs > 0)
-            backfillSlots(removedFromRecs);
-    }
-    if (!hasEnoughData) {
-        return (React.createElement("div", { className: "empty" },
-            React.createElement("div", { className: "display" }, "Rate a few more movies first"),
-            React.createElement("div", null,
-                "You've logged ",
-                ratedList.length,
-                " of 3 needed. Once you rate at least 3, DIALD can learn your taste and recommend something for tonight.")));
-    }
-    return (React.createElement("div", null,
-        excludedGenres.length > 0 && (React.createElement("div", { className: "setup-notice", style: { marginBottom: 16 } },
-            React.createElement("strong", null, "Not recommending:"),
-            " ",
-            excludedGenres.map(gid => (React.createElement("span", { key: gid, className: "platform-chip", style: { marginRight: 6 }, onClick: () => onRemoveExcludedGenre(gid) },
-                GENRE_MAP[gid] || gid,
-                " ",
-                React.createElement(IconX, { size: 10 })))))),
-        React.createElement("div", { className: "quiz-card" },
-            React.createElement("div", { className: "quiz-step" },
-                React.createElement("label", null, "Mood \u2014 pick as many genres as you'd like (leave blank to use your own taste profile)"),
-                React.createElement("div", { className: "pill-group" }, moodGenreList.map(g => (React.createElement("button", { key: g.id, className: `pill ${selectedMoodGenres.includes(g.id) ? "selected" : ""}`, onClick: () => toggleMoodGenre(g.id) }, g.name))))),
-            React.createElement("div", { className: "quiz-step" },
-                React.createElement("label", null, "How much time"),
-                React.createElement("div", { className: "pill-group" }, runtimes.map(r => (React.createElement("button", { key: r.key, className: `pill ${runtime === r.key ? "selected" : ""}`, onClick: () => setRuntime(r.key) }, r.label))))),
-            React.createElement("div", { className: "quiz-step" },
-                React.createElement("label", null, "Decade"),
-                React.createElement(DecadePicker, { selectedDecade: selectedDecade, onChange: setSelectedDecade })),
-            React.createElement("div", { className: "quiz-step" },
-                React.createElement("label", null, "Platform (optional \u2014 leave blank to see everything)"),
-                React.createElement("div", { className: "pill-group" }, ALL_SERVICES.map(s => (React.createElement("button", { key: s, className: `pill ${selectedPlatforms.includes(s) ? "selected" : ""}`, onClick: () => togglePlatform(s) }, s))))),
-            React.createElement("button", { className: "primary", style: { width: "100%" }, onClick: () => findMovies() }, "Find me 5 movies")),
-        loading && React.createElement("div", { className: "loading" }, "Cross-referencing your taste against what's out there\u2026"),
-        error && React.createElement("div", { className: "setup-notice", style: { marginTop: 20 } },
-            React.createElement("strong", null, "Error:"),
-            " ",
-            error),
-        recs && recs.length === 0 && !loading && (React.createElement("div", { className: "empty" },
-            React.createElement("div", { className: "display" }, "Nothing matched"),
-            React.createElement("div", null, "Try a different mood, runtime, decade, or platform."))),
-        recs && recs.length > 0 && (React.createElement("div", { style: { marginTop: 24 } },
-            recs.map(m => {
-                const isHeld = heldMovies.some(h => h.id === m.id);
-                return (React.createElement("div", { className: "rec-card", key: m.id, style: isHeld ? { borderColor: "var(--accent)" } : {} },
-                    React.createElement("div", { className: "poster-wrap", style: { width: 80, flexShrink: 0 }, onClick: () => setDetailMovieId(m.id) },
-                        m.poster_path
-                            ? React.createElement("img", { src: `${IMG_BASE}${m.poster_path}`, alt: m.title, style: { width: 80, height: 120 } })
-                            : React.createElement("div", { style: { width: 80, height: 120, background: "var(--divider)", borderRadius: "var(--radius-md)" } }),
-                        m.vote_average > 0 && (React.createElement("span", { className: `badge-tmdb tier-${ratingTier(m.vote_average)}` }, m.vote_average.toFixed(1)))),
-                    React.createElement("div", { style: { flex: 1 } },
-                        React.createElement("div", { className: "rec-title", style: { cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) },
-                            m.title,
-                            React.createElement(CertBadge, { meta: m._meta || metaCache[m.id] }),
-                            isHeld && React.createElement("span", { className: "cert-badge", style: { color: "var(--accent)", borderColor: "var(--accent)" } }, "HELD")),
-                        React.createElement("div", { className: "rec-meta" },
-                            (m.release_date || "").slice(0, 4),
-                            " \u00B7",
-                            " ",
-                            (m.genre_ids || []).filter(Boolean).slice(0, 3).map(g => (React.createElement("span", { key: g, style: { marginRight: 6 } },
-                                GENRE_MAP[g],
-                                React.createElement("span", { style: { cursor: "pointer", color: "var(--danger)", marginLeft: 2 }, title: `Stop recommending ${GENRE_MAP[g]}`, onClick: () => excludeGenre(g) },
-                                    React.createElement(IconX, { size: 10 })))))),
-                        m.overview && (React.createElement("div", { style: { fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5, marginBottom: 8 } }, m.overview.length > 140 ? m.overview.slice(0, 140).trim() + "…" : m.overview)),
-                        React.createElement(PlatformBadges, { meta: m._meta || metaCache[m.id], onPlatformClick: onPlatformClick }),
-                        React.createElement("div", { className: "rec-predicted" },
-                            "Predicted for you: ",
-                            m.predicted.toFixed(1)),
-                        React.createElement("div", { className: "rec-why" }, "Matched against your top-rated genres."),
-                        React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" } },
-                            ratings[m.id]
-                                ? React.createElement("span", { className: "card-rating" }, "\u2605 Already logged")
-                                : React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => setModalMovie(m) }, "Already seen it? Rate it"),
-                            React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => setTrailerMovie(m) },
-                                React.createElement(IconPlay, null),
-                                "Trailer"),
-                            React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px", color: isHeld ? "var(--accent)" : undefined, borderColor: isHeld ? "var(--accent)" : undefined }, onClick: () => toggleMaybe(m) }, isHeld ? React.createElement(React.Fragment, null,
-                                React.createElement(IconStar, { filled: true }),
-                                "Held") : React.createElement(React.Fragment, null,
-                                React.createElement(IconHelp, null),
-                                "Maybe")),
-                            React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => removeSuggestion(m), title: "Never suggest this movie again" },
-                                React.createElement(IconBan, null),
-                                "Not for me"),
-                            !queue[m.id] && React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => onAddToQueue(m) },
-                                React.createElement(IconBookmark, null),
-                                "Save for another night")))));
-            }),
-            React.createElement("div", { className: "see-more-row" },
-                React.createElement("button", { className: "ghost", onClick: () => findMovies(), disabled: loading }, "\uD83D\uDD04 New picks"),
-                backfilling && React.createElement("div", { style: { fontSize: 12, color: "var(--text-dim)", marginTop: 8 } }, "Finding a replacement\u2026")))),
-        modalMovie && (React.createElement(RatingModal, { movie: modalMovie, onSave: onRate, onClose: () => setModalMovie(null) })),
-        trailerMovie && (React.createElement(TrailerModal, { movie: trailerMovie, onClose: () => setTrailerMovie(null) })),
-        detailMovieId && (React.createElement(MovieDetailModal, { movieId: detailMovieId, ratings: ratings, onClose: () => setDetailMovieId(null), onRate: (m) => { setModalMovie(m); setDetailMovieId(null); }, onTrailer: (m) => { setTrailerMovie(m); setDetailMovieId(null); }, onActorClick: onActorClick, onPlatformClick: onPlatformClick, queue: queue, onAddToQueue: onAddToQueue }))));
-}
-ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(hasShareParams() ? ShareLandingPage : App, null));
-</script>
-<script>
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("sw.js").catch(() => {});
-    });
-  }
-</script>
-</body>
-</html>
+          
 Displaying DIALD-index-updated.txt.
