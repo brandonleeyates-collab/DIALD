@@ -804,9 +804,15 @@ const spotifyTopSongsFallback = async (artistName, artistId, limit = 10) => {
         const tracks = (data && data.tracks && data.tracks.items) || [];
         tracks.forEach(t => {
             const credited = t.artists || [];
-            const isThisArtist = artistId
-                ? credited.some(a => a.id === artistId)
-                : credited.some(a => a.name && a.name.trim().toLowerCase() === targetName);
+            // Match by Spotify artist ID OR by exact name — not ID-only when an ID is
+            // given. Root-caused 2026-09-16: an artist row created before the
+            // exact-name-match fix (or one added straight from Queue/My Songs, which
+            // never re-resolves against Spotify) can carry a stale spotify_id. With an
+            // ID-only check, that mismatch silently zeroed out every real track for that
+            // artist ("no songs to preview") even though the name-matched tracks were
+            // right there. Checking both means a stale ID no longer breaks this.
+            const isThisArtist = credited.some(a =>
+                (artistId && a.id === artistId) || (a.name && a.name.trim().toLowerCase() === targetName));
             if (!isThisArtist) return;
             const key = (t.name || "").trim().toLowerCase();
             const existing = byTitle.get(key);
@@ -875,22 +881,52 @@ async function musicbrainzArtistsByCity(cityNames, limit = 60) {
     return data.artists || [];
 }
 
-// A handful of Texas metro areas grouped together so searching "Dallas" also catches
-// Fort Worth/Denton/etc bands — MusicBrainz only matches the exact city an artist is
-// tagged with, so without this a metro search would miss most of the actual area. Add
-// more cities to a group, or more groups, any time; anything typed that isn't in this
-// list falls back to a plain exact-city MusicBrainz search instead of a metro one.
-const CITY_METRO_GROUPS = {
-    "dallas": ["Dallas", "Fort Worth", "Denton", "Arlington", "Plano", "Irving", "Grand Prairie", "McKinney", "Frisco", "Garland", "DFW"],
-    "fort worth": ["Dallas", "Fort Worth", "Denton", "Arlington", "Plano", "Irving", "Grand Prairie", "McKinney", "Frisco", "Garland", "DFW"],
-    "dfw": ["Dallas", "Fort Worth", "Denton", "Arlington", "Plano", "Irving", "Grand Prairie", "McKinney", "Frisco", "Garland", "DFW"],
-    "austin": ["Austin", "Round Rock", "San Marcos", "Georgetown"],
-    "houston": ["Houston", "The Woodlands", "Sugar Land", "Pasadena", "Katy"],
-    "san antonio": ["San Antonio", "New Braunfels"],
+// City search, redesigned 2026-09-16 per Brandon: search by STATE, broken down into
+// its major-city clusters, showing only major-to-mid-major acts (the long tail is
+// still fully searchable by name in Search, and still shows its hometown on its own
+// artist page — it's just not cluttering this browse list). Each state is a list of
+// city clusters; a cluster's own `cities` list is what actually gets OR'd into the
+// MusicBrainz query (so "Dallas" still also catches Fort Worth/Denton/etc under one
+// umbrella), and `label` is what's shown as that section's header. Texas only for now,
+// matching this app's existing TX-only metro coverage — easy to add more states later.
+const STATE_CITY_GROUPS = {
+    texas: [
+        { label: "Dallas–Fort Worth", cities: ["Dallas", "Fort Worth", "Denton", "Arlington", "Plano", "Irving", "Grand Prairie", "McKinney", "Frisco", "Garland", "DFW"] },
+        { label: "Austin", cities: ["Austin", "Round Rock", "San Marcos", "Georgetown"] },
+        { label: "Houston", cities: ["Houston", "The Woodlands", "Sugar Land", "Pasadena", "Katy"] },
+        { label: "San Antonio", cities: ["San Antonio", "New Braunfels"] },
+        { label: "El Paso", cities: ["El Paso"] },
+        { label: "Corpus Christi", cities: ["Corpus Christi"] },
+        { label: "Lubbock", cities: ["Lubbock"] },
+        { label: "Waco", cities: ["Waco"] },
+        { label: "Amarillo", cities: ["Amarillo"] },
+        { label: "Killeen–Temple", cities: ["Killeen", "Temple"] },
+    ],
 };
+STATE_CITY_GROUPS.tx = STATE_CITY_GROUPS.texas;
+
+// Below this many Spotify followers, an artist reads as "someone local's garage
+// band" rather than a name Brandon would recognize — filtered out of City browse
+// entirely per his ask ("not every band in the world should be listed... just major
+// to mid major"). It's a first-guess cutoff, easy to raise/lower; anyone filtered out
+// here is still fully findable by typing their name into Search.
+const CITY_MAJOR_FOLLOWER_THRESHOLD = 2000;
+function followerCountOf(entry) {
+    return (entry.spotifyArtist && entry.spotifyArtist.followers && entry.spotifyArtist.followers.total) || 0;
+}
+
+// Typing something that isn't a recognized state (e.g. a specific city) still works
+// as a plain city/metro search, same as before the state redesign — matched against
+// every city cluster's own city list first (so "Dallas" alone still pulls the same
+// metro group), otherwise treated as one exact city name.
 function citiesForCityQuery(q) {
     const key = q.trim().toLowerCase();
-    return CITY_METRO_GROUPS[key] || [q.trim()];
+    for (const groups of Object.values(STATE_CITY_GROUPS)) {
+        for (const g of groups) {
+            if (g.cities.some(c => c.toLowerCase() === key) || g.label.toLowerCase() === key) return g.cities;
+        }
+    }
+    return [q.trim()];
 }
 
 // Producer search — another MusicBrainz-only fact, and a step further out than City:
@@ -1845,7 +1881,10 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
     const [genreError, setGenreError] = useState("");
 
     const [cityQuery, setCityQuery] = useState("");
-    const [cityResults, setCityResults] = useState([]);
+    // Always grouped now (2026-09-16 redesign): a plain city search just comes back
+    // as one group named after the city typed, so the render side never needs two
+    // different layouts for "state" vs "single city".
+    const [cityGroups, setCityGroups] = useState([]);
     const [cityLoading, setCityLoading] = useState(false);
     const [cityError, setCityError] = useState("");
     const [citySearchedFor, setCitySearchedFor] = useState(null);
@@ -2058,49 +2097,74 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
         } catch (e2) { setGenreError(e2.message); }
     }
 
+    // Resolves a batch of MusicBrainz city-name hits to Spotify artist objects (shared
+    // by both the state and plain-city paths below).
+    async function resolveCityHits(cityNames, limit) {
+        const hits = await musicbrainzArtistsByCity(cityNames, limit);
+        // MusicBrainz can return the same artist more than once across the matched
+        // cities/fields — dedupe by MBID, keep whichever hit scored higher.
+        const byId = new Map();
+        for (const a of hits) {
+            if (!a || !a.name || !a.id) continue;
+            const prev = byId.get(a.id);
+            if (!prev || (a.score || 0) > (prev.score || 0)) byId.set(a.id, a);
+        }
+        const unique = Array.from(byId.values()).sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 80);
+        return mapWithConcurrency(unique, 4, async a => {
+            try {
+                const spotifyArtist = await resolveArtistByName(a.name);
+                const areaName = (a["begin-area"] && a["begin-area"].name) || (a.area && a.area.name) || "";
+                return { name: a.name, area: areaName, spotifyArtist };
+            } catch (e2) {
+                return { name: a.name, area: "", spotifyArtist: null };
+            }
+        });
+    }
+
     async function doCitySearch(e) {
         if (e) e.preventDefault();
         if (!cityQuery.trim()) return;
         setCityLoading(true);
         setCityError("");
-        const searchedCity = cityQuery.trim();
-        setCitySearchedFor(searchedCity);
+        const searchedRaw = cityQuery.trim();
+        setCitySearchedFor(searchedRaw);
         try {
-            const cities = citiesForCityQuery(searchedCity);
-            const hits = await musicbrainzArtistsByCity(cities, 60);
-            // MusicBrainz can return the same artist more than once across the
-            // matched cities/fields — dedupe by MBID, keep whichever hit scored higher.
-            const byId = new Map();
-            for (const a of hits) {
-                if (!a || !a.name || !a.id) continue;
-                const prev = byId.get(a.id);
-                if (!prev || (a.score || 0) > (prev.score || 0)) byId.set(a.id, a);
+            const stateGroups = STATE_CITY_GROUPS[searchedRaw.toLowerCase()];
+            if (stateGroups) {
+                // State mode (2026-09-16 redesign, per Brandon): pull every major city
+                // cluster in the state in one go, then bucket results under whichever
+                // cluster they actually belong to, filtered down to major/mid-major acts
+                // only — MusicBrainz logs every local band ever formed, and Brandon's ask
+                // was that not every one of those should clutter this list. The long tail
+                // stays fully reachable by name in Search, and still shows its hometown on
+                // its own artist page.
+                const allCities = stateGroups.flatMap(g => g.cities);
+                const resolved = await resolveCityHits(allCities, 100);
+                const major = resolved.filter(r => followerCountOf(r) >= CITY_MAJOR_FOLLOWER_THRESHOLD);
+                const buckets = stateGroups.map(g => ({ label: g.label, cityKeys: g.cities.map(c => c.toLowerCase()), items: [] }));
+                const other = [];
+                major.forEach(r => {
+                    const areaLower = (r.area || "").toLowerCase();
+                    const bucket = areaLower && buckets.find(b => b.cityKeys.some(c => areaLower.includes(c) || c.includes(areaLower)));
+                    (bucket || { items: other }).items.push(r);
+                });
+                buckets.forEach(b => b.items.sort((a, b2) => followerCountOf(b2) - followerCountOf(a)));
+                other.sort((a, b2) => followerCountOf(b2) - followerCountOf(a));
+                const groups = buckets.filter(b => b.items.length > 0);
+                if (other.length) groups.push({ label: "Other Texas", items: other });
+                groups.sort((a, b2) => followerCountOf(b2.items[0]) - followerCountOf(a.items[0]));
+                setCityGroups(groups);
+            } else {
+                // Fallback: not a recognized state — treat it as a plain city/metro name,
+                // same lookup as before the state redesign, still filtered to major/
+                // mid-major and shown as a single group.
+                const cities = citiesForCityQuery(searchedRaw);
+                const resolved = await resolveCityHits(cities, 60);
+                const major = resolved
+                    .filter(r => followerCountOf(r) >= CITY_MAJOR_FOLLOWER_THRESHOLD)
+                    .sort((a, b) => followerCountOf(b) - followerCountOf(a));
+                setCityGroups(major.length ? [{ label: searchedRaw, items: major }] : []);
             }
-            const unique = Array.from(byId.values()).sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 50);
-            const resolved = await mapWithConcurrency(unique, 4, async a => {
-                try {
-                    const spotifyArtist = await resolveArtistByName(a.name);
-                    const areaName = (a["begin-area"] && a["begin-area"].name) || (a.area && a.area.name) || "";
-                    return { name: a.name, area: areaName, spotifyArtist };
-                } catch (e2) {
-                    return { name: a.name, area: "", spotifyArtist: null };
-                }
-            });
-            // Brandon's feedback 2026-09-15, then again 2026-09-16: the first pass here
-            // tried leading with the literally-searched city and only sorting by
-            // popularity as a tiebreaker within that group — still came back Fort Worth-
-            // heavy on a Dallas search, most likely because MusicBrainz's area/begin-area
-            // tagging is inconsistent (plenty of real Dallas acts are tagged "Texas" or
-            // "United States" instead of the city itself, so they were losing the
-            // city-match tiebreak entirely). Brandon's actual ask, stated plainly: "Most
-            // popular artists should always be first on these lists" — so drop the
-            // city-match tier and sort purely by Spotify follower count. Fort Worth bands
-            // still show up (metro grouping is still wanted, and the area subtitle still
-            // labels where each one's from), they just no longer get artificially bumped
-            // above better-known Dallas acts by an unreliable area-string match.
-            const followerCount = entry => (entry.spotifyArtist && entry.spotifyArtist.followers && entry.spotifyArtist.followers.total) || 0;
-            const sorted = resolved.slice().sort((a, b) => followerCount(b) - followerCount(a));
-            setCityResults(sorted);
         } catch (e2) {
             setCityError(e2.message || "Couldn't reach MusicBrainz.");
         } finally {
@@ -2274,27 +2338,33 @@ function MusicDiscoverTab({ onOpenArtist, session, onChanged }) {
 
         browseMode === "city" && React.createElement(React.Fragment, null,
             React.createElement("form", { className: "search-row", onSubmit: doCitySearch, style: { display: "flex", gap: 8, margin: "14px 0" } },
-                React.createElement("input", { type: "text", placeholder: "Search by city — try \"Dallas\"…", value: cityQuery, onChange: e => setCityQuery(e.target.value) }),
+                React.createElement("input", { type: "text", placeholder: "Search by state — try \"Texas\"…", value: cityQuery, onChange: e => setCityQuery(e.target.value) }),
                 React.createElement("button", { className: "primary", type: "submit", disabled: cityLoading }, cityLoading ? "…" : "Search")),
             cityError && React.createElement("div", { style: { color: "var(--danger)", fontSize: 13 } }, cityError),
-            !cityLoading && cityResults.length === 0 && !cityError && (React.createElement("div", { className: "empty" },
-                React.createElement("div", { className: "display" }, "Search for a city or metro area"),
-                React.createElement("div", null, citySearchedFor ? "No matches found on MusicBrainz for that city." : "Try \"Dallas\", \"Austin\", \"Houston\", or \"San Antonio\" — covers the surrounding metro too."))),
+            !cityLoading && cityGroups.length === 0 && !cityError && (React.createElement("div", { className: "empty" },
+                React.createElement("div", { className: "display" }, "Search for a state, or a specific city"),
+                React.createElement("div", null, citySearchedFor ? "No major/mid-major artists found for that — try a specific city, or search their name directly in Search." : "Try \"Texas\" for the whole state broken down by city, or a specific city like \"Dallas\"."))),
             cityLoading ? React.createElement("div", { className: "empty" }, React.createElement("div", { className: "display" }, "Loading…")) :
-                cityResults.length > 0 && React.createElement("div", { className: "grid" }, cityResults.filter(entry => !handledNames.has((entry.name || "").trim().toLowerCase())).map((entry, i) => {
-                    const img = entry.spotifyArtist && entry.spotifyArtist.images && entry.spotifyArtist.images.length ? entry.spotifyArtist.images[0].url : null;
-                    const favId = entry.spotifyArtist && entry.spotifyArtist.id;
-                    return React.createElement(MusicArtistCard, {
-                        key: favId || `${entry.name}-${i}`, name: entry.name, imageUrl: img, subtitle: entry.area || "",
-                        onOpen: () => openCityArtist(entry),
-                        onFavorite: session ? () => favoriteCityArtist(entry) : null,
-                        favorited: favId ? favoritedIds.includes(favId) : false,
-                        onExclude: session ? () => excludeCityArtist(entry) : null,
-                        excluded: favId ? excludedIds.includes(favId) : false,
-                        onDig: session ? () => digCityArtist(entry) : null,
-                        digging: favId ? diggingIds.includes(favId) : false,
-                    });
-                }))),
+                cityGroups.map(group => {
+                    const items = group.items.filter(entry => !handledNames.has((entry.name || "").trim().toLowerCase()));
+                    if (items.length === 0) return null;
+                    return React.createElement("div", { key: group.label, style: { marginTop: 18 } },
+                        React.createElement("div", { style: { fontSize: 13, fontWeight: 700, color: "var(--text-faint)", textTransform: "uppercase", letterSpacing: 0.4, margin: "0 0 8px 2px" } }, `${group.label} (${items.length})`),
+                        React.createElement("div", { className: "grid" }, items.map((entry, i) => {
+                            const img = entry.spotifyArtist && entry.spotifyArtist.images && entry.spotifyArtist.images.length ? entry.spotifyArtist.images[0].url : null;
+                            const favId = entry.spotifyArtist && entry.spotifyArtist.id;
+                            return React.createElement(MusicArtistCard, {
+                                key: favId || `${entry.name}-${i}`, name: entry.name, imageUrl: img, subtitle: entry.area || "",
+                                onOpen: () => openCityArtist(entry),
+                                onFavorite: session ? () => favoriteCityArtist(entry) : null,
+                                favorited: favId ? favoritedIds.includes(favId) : false,
+                                onExclude: session ? () => excludeCityArtist(entry) : null,
+                                excluded: favId ? excludedIds.includes(favId) : false,
+                                onDig: session ? () => digCityArtist(entry) : null,
+                                digging: favId ? diggingIds.includes(favId) : false,
+                            });
+                        })));
+                })),
 
         browseMode === "producer" && React.createElement(React.Fragment, null,
             React.createElement("form", { className: "search-row", onSubmit: doProducerSearch, style: { display: "flex", gap: 8, margin: "14px 0" } },
