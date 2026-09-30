@@ -1,7 +1,3 @@
-
-DIALD-sw-updated.txt
-
-100%
 const CACHE_NAME = "diald-v2";
 const APP_SHELL = [
   "./",
@@ -49,4 +45,3 @@ self.addEventListener("fetch", (event) => {
       .catch(() => caches.match(event.request))
   );
 });
-Displaying DIALD-sw-updated.txt.
