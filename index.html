@@ -1,7 +1,3 @@
-
-DIALD-index-updated.txt
-
-100%
 Title: 
 URL: https://raw.githubusercontent.com
 Source element: <body>
@@ -4358,5 +4354,132 @@ function TonightTab({ ratings, onRate, onPlatformClick, onActorClick, notForMeId
                 const filtered = more.filter(m => !isExcluded(m, picked.map(p => p.id)));
                 while (picked.length < count && filtered.length > 0) {
                     picked.push(filtered.shift());
-          
-Displaying DIALD-index-updated.txt.
+                }
+                pool = filtered;
+            }
+            catch (e) { }
+        }
+        setCandidatePool(pool);
+        if (picked.length > 0) {
+            setRecs(prev => (prev || []).concat(picked).slice(0, 5));
+            setSeenIds(prev => prev.concat(picked.map(m => m.id)));
+        }
+        setBackfilling(false);
+    }
+    function removeSuggestion(movie) {
+        setRecs(prev => (prev || []).filter(m => m.id !== movie.id));
+        setHeldMovies(prev => prev.filter(m => m.id !== movie.id));
+        onAddNotForMe(movie);
+        backfillSlots(1);
+    }
+    function excludeGenre(genreId) {
+        onAddExcludedGenre(genreId);
+        const removedFromRecs = (recs || []).filter(m => (m.genre_ids || []).indexOf(genreId) !== -1).length;
+        setRecs(prev => (prev || []).filter(m => (m.genre_ids || []).indexOf(genreId) === -1));
+        setHeldMovies(prev => prev.filter(m => (m.genre_ids || []).indexOf(genreId) === -1));
+        if (removedFromRecs > 0)
+            backfillSlots(removedFromRecs);
+    }
+    if (!hasEnoughData) {
+        return (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Rate a few more movies first"),
+            React.createElement("div", null,
+                "You've logged ",
+                ratedList.length,
+                " of 3 needed. Once you rate at least 3, DIALD can learn your taste and recommend something for tonight.")));
+    }
+    return (React.createElement("div", null,
+        excludedGenres.length > 0 && (React.createElement("div", { className: "setup-notice", style: { marginBottom: 16 } },
+            React.createElement("strong", null, "Not recommending:"),
+            " ",
+            excludedGenres.map(gid => (React.createElement("span", { key: gid, className: "platform-chip", style: { marginRight: 6 }, onClick: () => onRemoveExcludedGenre(gid) },
+                GENRE_MAP[gid] || gid,
+                " ",
+                React.createElement(IconX, { size: 10 })))))),
+        React.createElement("div", { className: "quiz-card" },
+            React.createElement("div", { className: "quiz-step" },
+                React.createElement("label", null, "Mood \u2014 pick as many genres as you'd like (leave blank to use your own taste profile)"),
+                React.createElement("div", { className: "pill-group" }, moodGenreList.map(g => (React.createElement("button", { key: g.id, className: `pill ${selectedMoodGenres.includes(g.id) ? "selected" : ""}`, onClick: () => toggleMoodGenre(g.id) }, g.name))))),
+            React.createElement("div", { className: "quiz-step" },
+                React.createElement("label", null, "How much time"),
+                React.createElement("div", { className: "pill-group" }, runtimes.map(r => (React.createElement("button", { key: r.key, className: `pill ${runtime === r.key ? "selected" : ""}`, onClick: () => setRuntime(r.key) }, r.label))))),
+            React.createElement("div", { className: "quiz-step" },
+                React.createElement("label", null, "Decade"),
+                React.createElement(DecadePicker, { selectedDecade: selectedDecade, onChange: setSelectedDecade })),
+            React.createElement("div", { className: "quiz-step" },
+                React.createElement("label", null, "Platform (optional \u2014 leave blank to see everything)"),
+                React.createElement("div", { className: "pill-group" }, ALL_SERVICES.map(s => (React.createElement("button", { key: s, className: `pill ${selectedPlatforms.includes(s) ? "selected" : ""}`, onClick: () => togglePlatform(s) }, s))))),
+            React.createElement("button", { className: "primary", style: { width: "100%" }, onClick: () => findMovies() }, "Find me 5 movies")),
+        loading && React.createElement("div", { className: "loading" }, "Cross-referencing your taste against what's out there\u2026"),
+        error && React.createElement("div", { className: "setup-notice", style: { marginTop: 20 } },
+            React.createElement("strong", null, "Error:"),
+            " ",
+            error),
+        recs && recs.length === 0 && !loading && (React.createElement("div", { className: "empty" },
+            React.createElement("div", { className: "display" }, "Nothing matched"),
+            React.createElement("div", null, "Try a different mood, runtime, decade, or platform."))),
+        recs && recs.length > 0 && (React.createElement("div", { style: { marginTop: 24 } },
+            recs.map(m => {
+                const isHeld = heldMovies.some(h => h.id === m.id);
+                return (React.createElement("div", { className: "rec-card", key: m.id, style: isHeld ? { borderColor: "var(--accent)" } : {} },
+                    React.createElement("div", { className: "poster-wrap", style: { width: 80, flexShrink: 0 }, onClick: () => setDetailMovieId(m.id) },
+                        m.poster_path
+                            ? React.createElement("img", { src: `${IMG_BASE}${m.poster_path}`, alt: m.title, style: { width: 80, height: 120 } })
+                            : React.createElement("div", { style: { width: 80, height: 120, background: "var(--divider)", borderRadius: "var(--radius-md)" } }),
+                        m.vote_average > 0 && (React.createElement("span", { className: `badge-tmdb tier-${ratingTier(m.vote_average)}` }, m.vote_average.toFixed(1)))),
+                    React.createElement("div", { style: { flex: 1 } },
+                        React.createElement("div", { className: "rec-title", style: { cursor: "pointer" }, onClick: () => setDetailMovieId(m.id) },
+                            m.title,
+                            React.createElement(CertBadge, { meta: m._meta || metaCache[m.id] }),
+                            isHeld && React.createElement("span", { className: "cert-badge", style: { color: "var(--accent)", borderColor: "var(--accent)" } }, "HELD")),
+                        React.createElement("div", { className: "rec-meta" },
+                            (m.release_date || "").slice(0, 4),
+                            " \u00B7",
+                            " ",
+                            (m.genre_ids || []).filter(Boolean).slice(0, 3).map(g => (React.createElement("span", { key: g, style: { marginRight: 6 } },
+                                GENRE_MAP[g],
+                                React.createElement("span", { style: { cursor: "pointer", color: "var(--danger)", marginLeft: 2 }, title: `Stop recommending ${GENRE_MAP[g]}`, onClick: () => excludeGenre(g) },
+                                    React.createElement(IconX, { size: 10 })))))),
+                        m.overview && (React.createElement("div", { style: { fontSize: 13, color: "var(--text-dim)", lineHeight: 1.5, marginBottom: 8 } }, m.overview.length > 140 ? m.overview.slice(0, 140).trim() + "…" : m.overview)),
+                        React.createElement(PlatformBadges, { meta: m._meta || metaCache[m.id], onPlatformClick: onPlatformClick }),
+                        React.createElement("div", { className: "rec-predicted" },
+                            "Predicted for you: ",
+                            m.predicted.toFixed(1)),
+                        React.createElement("div", { className: "rec-why" }, "Matched against your top-rated genres."),
+                        React.createElement("div", { style: { display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" } },
+                            ratings[m.id]
+                                ? React.createElement("span", { className: "card-rating" }, "\u2605 Already logged")
+                                : React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => setModalMovie(m) }, "Already seen it? Rate it"),
+                            React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => setTrailerMovie(m) },
+                                React.createElement(IconPlay, null),
+                                "Trailer"),
+                            React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px", color: isHeld ? "var(--accent)" : undefined, borderColor: isHeld ? "var(--accent)" : undefined }, onClick: () => toggleMaybe(m) }, isHeld ? React.createElement(React.Fragment, null,
+                                React.createElement(IconStar, { filled: true }),
+                                "Held") : React.createElement(React.Fragment, null,
+                                React.createElement(IconHelp, null),
+                                "Maybe")),
+                            React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => removeSuggestion(m), title: "Never suggest this movie again" },
+                                React.createElement(IconBan, null),
+                                "Not for me"),
+                            !queue[m.id] && React.createElement("button", { className: "log-btn", style: { width: "auto", padding: "6px 12px" }, onClick: () => onAddToQueue(m) },
+                                React.createElement(IconBookmark, null),
+                                "Save for another night")))));
+            }),
+            React.createElement("div", { className: "see-more-row" },
+                React.createElement("button", { className: "ghost", onClick: () => findMovies(), disabled: loading }, "\uD83D\uDD04 New picks"),
+                backfilling && React.createElement("div", { style: { fontSize: 12, color: "var(--text-dim)", marginTop: 8 } }, "Finding a replacement\u2026")))),
+        modalMovie && (React.createElement(RatingModal, { movie: modalMovie, onSave: onRate, onClose: () => setModalMovie(null) })),
+        trailerMovie && (React.createElement(TrailerModal, { movie: trailerMovie, onClose: () => setTrailerMovie(null) })),
+        detailMovieId && (React.createElement(MovieDetailModal, { movieId: detailMovieId, ratings: ratings, onClose: () => setDetailMovieId(null), onRate: (m) => { setModalMovie(m); setDetailMovieId(null); }, onTrailer: (m) => { setTrailerMovie(m); setDetailMovieId(null); }, onActorClick: onActorClick, onPlatformClick: onPlatformClick, queue: queue, onAddToQueue: onAddToQueue }))));
+}
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(hasShareParams() ? ShareLandingPage : App, null));
+</script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
